@@ -16,7 +16,7 @@
 |--------|------|--------|-------|-------|
 | 1 — PDF Extractor | pdf_extractor.py | ✅ Complete | 95/100 | Edge cases in section splitting left for Phase 5 |
 | 2 — Structure Checker | structure_checker.py | ✅ Complete | 88/100 | Order score affected by duplicate subsection matching. Fix in Phase 5 |
-| 3 — Abstract Analyzer | abstract_analyzer.py | 🔲 Not Started | — | — |
+| 3 — Abstract Analyzer | abstract_analyzer.py | ✅ Complete | 78/100 | Tested on Attention paper. NLI sentence-split fix applied. |
 | 4 — Introduction Analyzer | introduction_analyzer.py | 🔲 Not Started | — | — |
 | 5 — Literature Reviewer | literature_reviewer.py | 🔲 Not Started | — | — |
 | 6 — Methodology Checker | methodology_checker.py | 🔲 Not Started | — | — |
@@ -41,7 +41,7 @@
 | Phase | Description | Status |
 |-------|-------------|--------|
 | Phase 0 | Environment Setup | ✅ Complete |
-| Phase 1 | Core Pipeline | 🔄 In Progress |
+| Phase 1 | Core Pipeline | 🔄 In Progress (3/6 done) |
 | Phase 2 | Section Analysis Modules | 🔲 Not Started |
 | Phase 3 | Intelligence Modules | 🔲 Not Started |
 | Phase 4 | UI Build | 🔲 Not Started |
@@ -87,9 +87,9 @@
 | BERT | 6/6 ✅ | 0/2 ⚠️ | 1.71/4 | 2/2 ✅ | 10.71 |
 
 ### Known Issues (Fix in Phase 5)
-- Order score 0 in both papers — caused by subsections 
+- Order score 0 in both papers — caused by subsections
   matching methodology multiple times in detected_order
-- Word count low — because matched section is one 
+- Word count low — because matched section is one
   subsection, not full merged methodology
 
 ### What Works
@@ -98,6 +98,46 @@
 - ✅ Subsection bonus scoring working
 - ✅ Feedback generation working
 - ✅ JSON output clean and complete
+
+---
+
+## Module 3 — Detailed Log
+
+### Test Results
+
+| Paper | Completeness | Length | Clarity | Contribution | Keywords | Total |
+|-------|-------------|--------|---------|-------------|---------|-------|
+| Attention Is All You Need | 24/30 | 14/20 | 20/20 | 15/15 | 5/15 | 78/100 |
+
+### Components Found (Attention Paper)
+- background: ✅ | objective: ✅ | methodology: ✅ | results: ✅ | conclusion: ❌ (paper doesn't explicitly conclude in abstract — correct behavior)
+
+### Critical Bug Fixed
+- **Root cause:** `cross-encoder/nli-MiniLM2-L6-H768` is a sentence-pair model — feeding full 326-word abstract as premise gave entailment prob of 0.02 (effectively 0) for all components
+- **Fix:** Split abstract into individual sentences, run NLI on each sentence × each hypothesis, take max entailment prob across all combinations
+- **Result:** Completeness went from 0/30 → 24/30
+
+### Other Fixes Applied
+- ✅ NLI label index auto-detected from `model.config.id2label` (this model: `{0: contradiction, 1: entailment, 2: neutral}`)
+- ✅ Multiple hypotheses per component (3 per component) — ANY entailment ≥ 0.45 → component found
+- ✅ Extended stopword list — removed filler words like "while", "best", "also" from keyword extraction
+- ✅ Word length filter `len(w) > 3` added to keyword extraction
+
+### What Works
+- ✅ Abstract found correctly via flexible key matching
+- ✅ Sentence-level NLI for completeness
+- ✅ Length scoring
+- ✅ Clarity scoring (spaCy sentence length + passive ratio)
+- ✅ Contribution phrase detection
+- ✅ NLI fallback for contribution
+- ✅ Keyword extraction (clean, meaningful words)
+- ✅ Title similarity via MiniLM embeddings
+- ✅ Feedback generation
+- ✅ Edge case handling (abstract not found / too short)
+
+### Notes
+- title_similarity = 0.39 (low) — acceptable, MiniLM not specialized for scientific text
+- keyword_presence = 5/15 — room for improvement, noted for Phase 5
 
 ---
 
@@ -110,6 +150,8 @@
 | Dot-prefixed heading | 1 | ResNet | Low |
 | Order score 0 due to duplicate subsection matching | 2 | Attention, BERT | Medium |
 | Word count uses subsection not full section | 2 | Attention, BERT | Medium |
+| title_similarity low (0.39) for Attention paper | 3 | Attention | Low |
+| keyword_presence score low (5/15) | 3 | Attention | Low |
 
 ---
 
@@ -120,6 +162,7 @@
 | May 2025 | Phase 0 complete — env setup, folder structure, model downloads |
 | May 2025 | Module 1 complete — PDF extractor + section splitter, tested on 4 papers |
 | May 2025 | Module 2 complete — structure checker, tested on Attention + BERT |
+| June 2025 | Module 3 complete — abstract analyzer. Fixed NLI sentence-split bug, label index detection, stopword filtering. Score: 78/100 on Attention paper |
 
 ---
 
@@ -130,6 +173,6 @@ cd /Users/yashkhadgi/r2r
 source r2r_env/bin/activate
 ```
 
-**Current status:** Phase 1, Module 2 complete  
-**Next file to build:** modules/abstract_analyzer.py (Module 3)  
-**Next Gemini model to use:** Claude Sonnet 4 (1.3x) — NLI pipeline
+**Current status:** Phase 1, Module 3 complete
+**Next file to build:** modules/introduction_analyzer.py (Module 4)
+**Next Gemini model to use:** Deepseek v3.2 (0.25x) — pattern matching
