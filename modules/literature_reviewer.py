@@ -34,11 +34,34 @@ def _find_literature_section(paper_data: Dict[str, Any]) -> Tuple[Optional[str],
         "Prior Work", "PRIOR WORK", "prior work"
     ]
     
+    # Get ordered list of section keys to find subsections after a match
+    section_keys_ordered = list(sections.keys())
+
     for key in primary_keys:
         if key in sections and isinstance(sections[key], dict):
             text = sections[key].get("text", "").strip()
-            if text:
+            if text and len(text.split()) >= 100:
                 return text, key, False
+            # Section found but too short — merge following subsections
+            if key in section_keys_ordered:
+                idx = section_keys_ordered.index(key)
+                merged = text
+                # Merge next sections until we hit another primary section or 500 words
+                for next_key in section_keys_ordered[idx+1:]:
+                    # Stop if we hit a major section
+                    if any(stop in next_key.lower() for stop in [
+                        "abstract", "introduction", "methodology", "method",
+                        "experiment", "result", "discussion", "conclusion",
+                        "reference", "appendix"
+                    ]):
+                        break
+                    next_text = sections[next_key].get("text", "").strip() if isinstance(sections[next_key], dict) else ""
+                    if next_text:
+                        merged += " " + next_text
+                    if len(merged.split()) >= 300:
+                        break
+                if merged.strip():
+                    return merged.strip(), key, False
                 
     # 2. Relaxed Regex Match Scan keys
     for key, data in sections.items():
