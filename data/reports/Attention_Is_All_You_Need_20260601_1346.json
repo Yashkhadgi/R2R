@@ -1,0 +1,188 @@
+{
+  "paper_title": "Attention Is All You Need",
+  "paper_type": "conference",
+  "page_count": 15,
+  "total_words": 6581,
+  "analysis_timestamp": "2026-06-01T13:46:43.277973",
+  "overall_score": 73.94,
+  "grade": "B",
+  "verdict": "Minor Revision",
+  "scores": {
+    "structure": 10.14,
+    "abstract": 7.8,
+    "introduction": 8.5,
+    "literature": 5.2,
+    "methodology": 11.0,
+    "results": 9.0,
+    "discussion": 5.8,
+    "conclusion": 3.8,
+    "grammar": 7.5,
+    "vocabulary": 5.2
+  },
+  "score_breakdown": [
+    {
+      "module": "structure",
+      "display_name": "Structure & Completeness",
+      "raw_score": 10.14,
+      "max_raw": 15,
+      "weighted_score": 10.14,
+      "max_weight": 15,
+      "percentage": 67.6
+    },
+    {
+      "module": "methodology",
+      "display_name": "Methodology Completeness",
+      "raw_score": 11.0,
+      "max_raw": 15,
+      "weighted_score": 11.0,
+      "max_weight": 15,
+      "percentage": 73.33
+    },
+    {
+      "module": "results",
+      "display_name": "Results Quality",
+      "raw_score": 9.0,
+      "max_raw": 12,
+      "weighted_score": 9.0,
+      "max_weight": 12,
+      "percentage": 75.0
+    },
+    {
+      "module": "abstract",
+      "display_name": "Abstract Quality",
+      "raw_score": 7.8,
+      "max_raw": 10,
+      "weighted_score": 7.8,
+      "max_weight": 10,
+      "percentage": 78.0
+    },
+    {
+      "module": "introduction",
+      "display_name": "Introduction Analysis",
+      "raw_score": 8.5,
+      "max_raw": 10,
+      "weighted_score": 8.5,
+      "max_weight": 10,
+      "percentage": 85.0
+    },
+    {
+      "module": "grammar",
+      "display_name": "Grammar & Language",
+      "raw_score": 7.5,
+      "max_raw": 10,
+      "weighted_score": 7.5,
+      "max_weight": 10,
+      "percentage": 75.0
+    },
+    {
+      "module": "literature",
+      "display_name": "Literature Review",
+      "raw_score": 5.2,
+      "max_raw": 8,
+      "weighted_score": 5.2,
+      "max_weight": 8,
+      "percentage": 65.0
+    },
+    {
+      "module": "discussion",
+      "display_name": "Discussion Depth",
+      "raw_score": 5.8,
+      "max_raw": 8,
+      "weighted_score": 5.8,
+      "max_weight": 8,
+      "percentage": 72.5
+    },
+    {
+      "module": "vocabulary",
+      "display_name": "Vocabulary & Writing Style",
+      "raw_score": 5.2,
+      "max_raw": 7,
+      "weighted_score": 5.2,
+      "max_weight": 7,
+      "percentage": 74.29
+    },
+    {
+      "module": "conclusion",
+      "display_name": "Conclusion",
+      "raw_score": 3.8,
+      "max_raw": 5,
+      "weighted_score": 3.8,
+      "max_weight": 5,
+      "percentage": 76.0
+    }
+  ],
+  "improvement_priorities": [
+    {
+      "module": "structure",
+      "display_name": "Structure & Completeness",
+      "weighted_score": 10.14,
+      "max_weight": 15,
+      "gap": 4.86,
+      "percentage": 67.6,
+      "priority": "Medium"
+    },
+    {
+      "module": "methodology",
+      "display_name": "Methodology Completeness",
+      "weighted_score": 11.0,
+      "max_weight": 15,
+      "gap": 4.0,
+      "percentage": 73.33,
+      "priority": "Medium"
+    },
+    {
+      "module": "results",
+      "display_name": "Results Quality",
+      "weighted_score": 9.0,
+      "max_weight": 12,
+      "gap": 3.0,
+      "percentage": 75.0,
+      "priority": "Low"
+    }
+  ],
+  "summary_feedback": "The manuscript achieved an aggregated evaluation score of 73.94/100, resulting in a grade of 'B' and an automated reviewer verdict of 'Minor Revision'. To significantly elevate the paper's quality, the authors should prioritize addressing shortcomings in Structure & Completeness and Methodology Completeness. Overall, the foundational research framework is robust and requires only refined adjustments prior to formal submission.",
+  "section_word_counts": {
+    "Introduction": 326,
+    "Abstract": 326,
+    "Background": 269,
+    "Model Architecture": 137,
+    "Encoder And Decoder Stacks": 308,
+    "Scaled Dot-Product Attention": 271,
+    "Multi-Head Attention": 303,
+    "Applications Of Attention In Our Model": 191,
+    "Position-Wise Feed-Forward Networks": 113,
+    "Embeddings And Softmax": 202,
+    "Positional Encoding": 262,
+    "Why Self-Attention": 554,
+    "Training Data And Batching": 90,
+    "Hardware And Schedule": 363,
+    "Residual Dropout": 60,
+    "Label Smoothing": 36,
+    "Machine Translation": 295,
+    "Model Variations": 383,
+    "English Constituency Parsing": 384,
+    "Conclusion": 174,
+    "References": 993,
+    "Attention Visualizations": 432
+  },
+  "feedback_by_module": {
+    "structure": [
+      "Structural sequencing anomalies detected: sections out of order -> abstract, methodology, results, methodology",
+      "Abstract exceeds structural limits (326 words, ideal: 150-250)",
+      "Introduction is shorter than ideal range (326 words, ideal: 400-800)",
+      "Methodology is shorter than ideal range (137 words, ideal: 400-1000)",
+      "Results is shorter than ideal range (295 words, ideal: 300-800)",
+      "Excellent structural alignment: All mandatory structural sections are correctly accounted for.",
+      "Clean contextual boundaries verified. No text-contamination or structural leak patterns detected."
+    ],
+    "abstract": [],
+    "introduction": [],
+    "literature": [],
+    "methodology": [],
+    "results": [],
+    "discussion": [],
+    "conclusion": [],
+    "grammar": [],
+    "vocabulary": []
+  }
+}
