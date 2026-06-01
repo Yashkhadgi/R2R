@@ -88,11 +88,16 @@ def calculate_final_score(module_scores: dict) -> dict:
     weighted_scores = {}
     total_score = 0.0
     
-    for module, weight in SCORE_WEIGHTS.items():
+    # Use adjusted_weights if provided (when some modules are skipped)
+    weights_to_use = module_scores.pop("__adjusted_weights__", None) or SCORE_WEIGHTS
+
+    for module, weight in weights_to_use.items():
         score_data = module_scores.get(module, {"total_score": 0.0, "max_score": 100.0})
+        if isinstance(score_data, (int, float)):
+            score_data = {"total_score": float(score_data), "max_score": 100.0}
         raw = score_data.get("total_score", 0.0)
         max_raw = score_data.get("max_score", 100.0)
-        
+
         w_score = normalize_score(raw, max_raw, weight)
         weighted_scores[module] = w_score
         total_score += w_score
@@ -218,14 +223,44 @@ def aggregate_scores(module_scores: dict) -> dict:
         A comprehensive dictionary containing the final evaluation breakdown and summary.
     """
     # 1. Validate and patch missing module keys
+    # If a module result is an int (raw score), wrap it in a dict
+    # If a module is missing entirely, skip it (Rudrakshi modules may not be ready)
     validated_scores = {}
+    skipped_modules = set()
+
     for module, weight in SCORE_WEIGHTS.items():
         if module in module_scores:
-            validated_scores[module] = module_scores[module]
+            val = module_scores[module]
+            # If raw int/float passed directly, wrap it
+            if isinstance(val, (int, float)):
+                validated_scores[module] = {"total_score": float(val), "max_score": 100.0}
+            elif isinstance(val, dict):
+                # Skip modules that returned error or score 0 with no content
+                if val.get("error") or val.get("total_score", 0) == 0:
+                    skipped_modules.add(module)
+                else:
+                    validated_scores[module] = val
+            else:
+                skipped_modules.add(module)
         else:
-            validated_scores[module] = {"total_score": 0.0, "max_score": 100.0}
+            # Module not provided at all — skip it
+            skipped_modules.add(module)
+
+    # Redistribute weights of skipped modules proportionally
+    skipped_weight = sum(SCORE_WEIGHTS[m] for m in skipped_modules)
+    active_modules = {m: w for m, w in SCORE_WEIGHTS.items() if m not in skipped_modules}
+    total_active_weight = sum(active_modules.values())
+
+    # Build adjusted weights
+    adjusted_weights = {}
+    for module, weight in active_modules.items():
+        if total_active_weight > 0:
+            adjusted_weights[module] = weight + (skipped_weight * weight / total_active_weight)
+        else:
+            adjusted_weights[module] = weight
             
-    # 2. Compute foundational metrics
+    # 2. Inject adjusted weights and compute foundational metrics
+    validated_scores["__adjusted_weights__"] = adjusted_weights
     final_score_data = calculate_final_score(validated_scores)
     total_score = final_score_data["total_score"]
     weighted_scores = final_score_data["weighted_scores"]
