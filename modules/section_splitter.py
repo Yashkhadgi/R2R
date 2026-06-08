@@ -47,8 +47,13 @@ def is_heading(line: dict, median_font: float) -> bool:
     # Exact validation strategy targeting common structured headers
     if text_lower in KNOWN_SECTIONS:
         return True
+    # IEEE inline abstract/index terms detection
+    if text_stripped.startswith("Abstract—") or text_stripped.startswith("Abstract-") or text_stripped == "Abstract—":
+        return True
+    if text_stripped.startswith("Index Terms—") or text_stripped.startswith("Index Terms-"):
+        return True
         
-    # --- BUG 1 FIX: Immediate Metadata Rejections ---
+    # --- Immediate Metadata Rejections ---
     arxiv_patterns = [
         r"arXiv:\d+\.\d+",
         r"\[cs\.[A-Z]+\]",
@@ -58,7 +63,7 @@ def is_heading(line: dict, median_font: float) -> bool:
     if any(re.search(pat, text_stripped, re.IGNORECASE) for pat in arxiv_patterns):
         return False
 
-    # --- BUG 2 FIX: Immediate Figure/Table Caption Rejections (Case-Insensitive) ---
+    # --- Immediate Figure/Table Caption Rejections (Case-Insensitive) ---
     caption_patterns = [
         r"^Figure\s+[\d\w\.]+",
         r"^Fig\.\s+[\d\w\.]+",
@@ -89,7 +94,10 @@ def is_heading(line: dict, median_font: float) -> bool:
         return False
         
     valid_word_tokens = [t for t in tokens if re.search(r"[A-Za-z]", t)]
-    if len(valid_word_tokens) < 2:
+    # Allow single-word IEEE headings like "NTRODUCTION" (2-col split) or "INTRODUCTION"
+    ieee_roman = bool(re.match(r"^[IVXivx]+\.\s+\w+", text_stripped))
+    ieee_allcaps_single = (text_stripped.isupper() and len(text_stripped) >= 4)
+    if len(valid_word_tokens) < 2 and not ieee_allcaps_single and not ieee_roman:
         return False
         
     if text_stripped and text_stripped[0].isdigit():
@@ -99,6 +107,19 @@ def is_heading(line: dict, median_font: float) -> bool:
             
     if text_stripped.isupper() and len(text_stripped) < 4:
         return False
+    # IEEE ALL CAPS headings like "INTRODUCTION", "CONCLUSION", "METHODOLOGY"
+    ieee_known_caps = [
+        "INTRODUCTION", "CONCLUSION", "CONCLUSIONS", "REFERENCES", 
+        "ABSTRACT", "METHODOLOGY", "RESULTS", "DISCUSSION",
+        "BACKGROUND", "RELATED WORK", "EXPERIMENTS", "EVALUATION",
+        "ACKNOWLEDGMENT", "ACKNOWLEDGEMENTS", "LIMITATIONS", "SUMMARY"
+    ]
+    if text_stripped.upper() in ieee_known_caps:
+        return True
+    # Partial match for truncated 2-column headings like "NTRODUCTION"
+    for known in ieee_known_caps:
+        if len(text_stripped) >= 4 and known.endswith(text_stripped.upper()):
+            return True
         
     # --- Structural Sizing Evaluation ---
     size_pass = line["font_size"] >= (median_font * HEADING_FONT_SIZE_THRESHOLD)
@@ -124,7 +145,77 @@ def normalize_heading(text: str) -> str:
     Returns:
         str: Uniformly formatted heading label.
     """
-    text_cleaned = text.strip().title()
+    if not text:
+        return ""
+
+    text_cleaned = text.strip()
+
+    # === IEEE SPACED HEADING FIX ===
+    # Detects "R ELATED  W ORK" style and collapses to "Related Work"
+    tokens = text_cleaned.split(' ')
+    tokens = [t for t in tokens if t]  # remove empty strings
+    if len(tokens) > 1:
+        single_char_count = sum(1 for t in tokens if len(t) == 1)
+        if single_char_count / len(tokens) > 0.4:
+            # Split on 2+ spaces to get word-groups, collapse each
+            word_groups = re.split(r' {2,}', text_cleaned)
+            collapsed = [re.sub(r' +', '', g) for g in word_groups]
+            text_cleaned = ' '.join(collapsed)
+    # === END IEEE FIX ===
+
+    # IEEE Fix 1: "Abstract—" or "Abstract-" → "Abstract"
+    text_cleaned = re.sub(r'^Abstract[—\-]+.*', 'Abstract', text_cleaned, flags=re.IGNORECASE)
+
+    # IEEE Fix 2: "Index Terms—..." → "Index Terms"
+    text_cleaned = re.sub(r'^Index Terms[—\-]+.*', 'Index Terms', text_cleaned, flags=re.IGNORECASE)
+
+    # IEEE Fix 3: Truncated 2-column headings
+    truncated_map = {
+        "NTRODUCTION": "Introduction",
+        "ELATED WORK": "Related Work",
+        "ELATEDORK": "Related Work",
+        "ELATED ORK": "Related Work",
+        "RIOR WORK": "Prior Work",
+        "RIORORK": "Prior Work",
+        "ROPOSED SYSTEM": "Proposed System",
+        "ROPOSEDYSTEM": "Proposed System",
+        "ROPOSED YSTEM": "Proposed System",
+        "ROPOSED METHODOLOGY": "Methodology",
+        "XPERIMENTAL RESULTS": "Results",
+        "XPERIMENTALESULTS": "Results",
+        "ONCLUSION": "Conclusion",
+        "ONCLUSIONS": "Conclusion",
+        "ETHODOLOGY": "Methodology",
+        "ESULTS": "Results",
+        "ISCUSSION": "Discussion",
+        "EFERENCES": "References",
+        "BSTRACT": "Abstract",
+        "VALUATION": "Evaluation",
+        "XPERIMENTS": "Experiments",
+        "CKNOWLEDGMENT": "Acknowledgements",
+        "IMITATIONS": "Limitations",
+        "UMMARY": "Summary",
+        "ACKGROUND": "Background",
+    }
+    upper = text_cleaned.upper().strip()
+    for trunc, full in truncated_map.items():
+        if upper == trunc or upper.endswith(trunc):
+            text_cleaned = full
+            break
+
+    # IEEE Fix 4: Roman numeral headings "I. INTRODUCTION" → "Introduction"
+    roman_match = re.match(r'^[IVXivx]+\.\s+(.+)$', text_cleaned)
+    if roman_match:
+        inner = roman_match.group(1).strip().upper()
+        for trunc, full in truncated_map.items():
+            if inner == trunc or inner.endswith(trunc):
+                text_cleaned = full
+                break
+        else:
+            text_cleaned = roman_match.group(1).strip().title()
+
+    text_cleaned = text_cleaned.strip().title()
+    
     # Progressively strip downstream structure trail markers
     text_cleaned = re.sub(r'[\.\:;]+$', '', text_cleaned)
     return text_cleaned.strip()
@@ -155,6 +246,18 @@ def split_sections(lines: list[dict], title: str = "") -> dict:
     
     for line in lines:
         if is_heading(line, median_font):
+            raw_text = line["text"].strip()
+            # IEEE 2-column fix: merge consecutive short ALL-CAPS heading fragments
+            # e.g. "ELATED" + "ORK" -> "Related Work"
+            # If current_section_title exists and both are short ALL-CAPS, merge them
+            if (current_section_title and
+                len(current_section_title.strip()) <= 10 and
+                len(raw_text) <= 10 and
+                current_section_title.strip().isupper() and
+                raw_text.isupper() and
+                not current_body_lines):
+                current_section_title = current_section_title.strip() + raw_text
+                continue
             # Save accumulated text before establishing a new section boundary
             if current_body_lines or current_section_title:
                 detected_segments.append({
@@ -242,15 +345,15 @@ def split_sections(lines: list[dict], title: str = "") -> dict:
         if any(re.search(pat, heading_key, re.IGNORECASE) for pat in remove_patterns):
             continue
             
-        # 2. BUG 1: Remove section heading that matches paper title exactly
+        # 2. Remove section heading that matches paper title exactly
         if heading_lower == normalized_title_lower:
             continue
             
-        # 2b. BUG 1: Remove early repeating title blocks (word_count <= 10 on pages 1 or 2)
+        # 2b. Remove early repeating title blocks (word_count <= 10 on pages 1 or 2)
         if w_count <= 10 and p_start <= 2:
             continue
             
-        # 3. BUG 2: Title Fragment Rejection Filters
+        # 3. Title Fragment Rejection Filters
         if w_count < 50 and p_start <= 2:
             # Ends with a quote character
             if heading_key.endswith('"') or heading_key.endswith("'"):
@@ -262,7 +365,7 @@ def split_sections(lines: list[dict], title: str = "") -> dict:
             if len(heading_key.split()) <= 2 and p_start == 1:
                 continue
                 
-        # 4. BUG 3: Stray Author Names / Metadata Blocks trailing after Acknowledgements
+        # 4. Stray Author Names / Metadata Blocks trailing after Acknowledgements
         if ack_page is not None and p_start >= ack_page and (p_start - ack_page) <= 2:
             if heading_lower not in ["acknowledgements", "acknowledgments"]:
                 if w_count < 80 and heading_lower not in KNOWN_SECTIONS:

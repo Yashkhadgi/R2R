@@ -1,1403 +1,924 @@
+"""
+Research2Review (R2R) — Production App
+Fully offline ML-powered research paper evaluation tool.
+"""
+
 import streamlit as st
-import json
-import time
 import os
+import time
 import platform
-import tempfile
-from datetime import datetime
+from typing import Optional
 
-# ── Module imports (graceful) ──────────────────────────
-MODULES_AVAILABLE = {}
-
-try:
-    from modules.pdf_extractor import extract_paper
-    MODULES_AVAILABLE["pdf_extractor"] = True
-except Exception as e:
-    MODULES_AVAILABLE["pdf_extractor"] = False
-
-try:
-    from modules.abstract_analyzer import analyze_abstract
-    MODULES_AVAILABLE["abstract"] = True
-except:
-    MODULES_AVAILABLE["abstract"] = False
-
-try:
-    from modules.introduction_analyzer import analyze_introduction
-    MODULES_AVAILABLE["introduction"] = True
-except:
-    MODULES_AVAILABLE["introduction"] = False
-
-try:
-    from modules.literature_reviewer import analyze_literature
-    MODULES_AVAILABLE["literature"] = True
-except:
-    MODULES_AVAILABLE["literature"] = False
-
-try:
-    from modules.methodology_checker import analyze_methodology
-    MODULES_AVAILABLE["methodology"] = True
-except:
-    MODULES_AVAILABLE["methodology"] = False
-
-try:
-    from modules.results_checker import analyze_results
-    MODULES_AVAILABLE["results"] = True
-except:
-    MODULES_AVAILABLE["results"] = False
-
-try:
-    from modules.discussion_evaluator import evaluate_discussion
-    MODULES_AVAILABLE["discussion"] = True
-except:
-    MODULES_AVAILABLE["discussion"] = False
-
-try:
-    from modules.conclusion_evaluator import evaluate_conclusion
-    MODULES_AVAILABLE["conclusion"] = True
-except:
-    MODULES_AVAILABLE["conclusion"] = False
-
-try:
-    from modules.gap_finder import analyze_gaps
-    MODULES_AVAILABLE["gaps"] = True
-except:
-    MODULES_AVAILABLE["gaps"] = False
-
-try:
-    from modules.scoring_engine import aggregate_scores
-    MODULES_AVAILABLE["scoring"] = True
-except:
-    MODULES_AVAILABLE["scoring"] = False
-
-try:
-    from modules.summarizer import summarize_paper
-    MODULES_AVAILABLE["summarizer"] = True
-except:
-    MODULES_AVAILABLE["summarizer"] = False
-
-try:
-    from modules.keyword_analyzer import analyze_keywords
-    MODULES_AVAILABLE["keywords"] = True
-except:
-    MODULES_AVAILABLE["keywords"] = False
-
-try:
-    from modules.structure_checker import check_structure
-    MODULES_AVAILABLE["structure"] = True
-except:
-    MODULES_AVAILABLE["structure"] = False
-
-try:
-    from modules.report_generator import generate_report
-    MODULES_AVAILABLE["report"] = True
-except:
-    MODULES_AVAILABLE["report"] = False
-
-# ── Page config ────────────────────────────────────────
 st.set_page_config(
-    page_title="Research2Review",
-    page_icon="⬛",
+    page_title="R2R — Research2Review",
+    page_icon="🔬",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# ── CSS ────────────────────────────────────────────────
+# ── Module imports ────────────────────────────────────────────────────────────
+try:
+    from modules.pdf_extractor import extract_paper
+except ImportError:
+    extract_paper = None
+
+try:
+    from modules.abstract_analyzer import analyze_abstract
+except ImportError:
+    analyze_abstract = None
+
+try:
+    from modules.introduction_analyzer import analyze_introduction
+except ImportError:
+    analyze_introduction = None
+
+try:
+    from modules.literature_reviewer import analyze_literature
+except ImportError:
+    analyze_literature = None
+
+try:
+    from modules.methodology_checker import analyze_methodology
+except ImportError:
+    analyze_methodology = None
+
+try:
+    from modules.results_checker import analyze_results
+except ImportError:
+    analyze_results = None
+
+try:
+    from modules.discussion_evaluator import evaluate_discussion
+except ImportError:
+    evaluate_discussion = None
+
+try:
+    from modules.conclusion_evaluator import evaluate_conclusion
+except ImportError:
+    evaluate_conclusion = None
+
+try:
+    from modules.gap_finder import analyze_gaps
+except ImportError:
+    analyze_gaps = None
+
+try:
+    from modules.scoring_engine import aggregate_scores
+except ImportError:
+    aggregate_scores = None
+
+try:
+    from modules.summarizer import summarize_paper
+except ImportError:
+    summarize_paper = None
+
+# ── Session state init ────────────────────────────────────────────────────────
+defaults = {
+    "view": "upload",
+    "active_section": "overview",
+    "paper_data": {},
+    "results": {},
+    "final_score": {},
+    "summary": {},
+    "analysis_time": 0.0,
+    "uploaded_file": None,
+    "failed_modules": [],
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+# ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
 
-/* Reset */
-#MainMenu, footer, header { visibility: hidden; }
-.stDeployButton { display: none; }
-.block-container {
-    padding: 0 !important;
-    max-width: 100% !important;
-}
-section[data-testid="stSidebar"] { display: none; }
-div[data-testid="stToolbar"] { display: none; }
-.stFileUploader label { display: none; }
-
-/* Base */
-html, body, [class*="css"] {
+html, body, [data-testid="stAppViewContainer"] {
     background-color: #0e0e0e !important;
     color: #f0f0f0 !important;
-    font-family: -apple-system, 'Segoe UI', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
 }
+[data-testid="stHeader"], #MainMenu, footer { display: none !important; }
+.stDeployButton, [data-testid="stDecoration"] { display: none !important; }
+.block-container { padding: 0 !important; max-width: 100% !important; }
+[data-testid="stSidebar"] { display: none !important; }
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: #161616; }
-::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
-
-/* File uploader */
-[data-testid="stFileUploader"] {
-    background: #161616 !important;
-    border: 1px solid #2a2a2a !important;
-    border-radius: 10px !important;
-    padding: 20px !important;
-}
-[data-testid="stFileUploader"]:hover {
-    border-color: #555 !important;
-}
-[data-testid="stFileDropzoneInstructions"] {
-    color: #999 !important;
-}
-
-/* Buttons */
-.stButton > button {
-    background: #fff !important;
+div.stButton > button {
+    background: #f0f0f0 !important;
     color: #0e0e0e !important;
     border: none !important;
     border-radius: 6px !important;
-    font-weight: 600 !important;
     font-size: 13px !important;
+    font-weight: 500 !important;
     padding: 8px 20px !important;
-    cursor: pointer !important;
-    transition: opacity 0.15s !important;
+    width: auto !important;
+    transition: background 0.15s !important;
 }
-.stButton > button:hover {
-    opacity: 0.85 !important;
-}
+div.stButton > button:hover { background: #d0d0d0 !important; }
 
-/* Progress */
-.stProgress > div > div {
-    background-color: #4ade80 !important;
+div[data-testid="stFileUploader"] {
+    background: #161616 !important;
+    border: 1px dashed #333 !important;
+    border-radius: 8px !important;
 }
-.stProgress > div {
-    background-color: #252525 !important;
-    border-radius: 4px !important;
-}
+div[data-testid="stFileUploader"] label { color: #999 !important; }
 
-/* Metrics */
-[data-testid="stMetricValue"] {
-    font-family: 'JetBrains Mono', monospace !important;
+.stProgress > div > div { background: #f0f0f0 !important; }
+.stProgress { background: #222 !important; }
+
+div[data-testid="stDownloadButton"] > button {
+    background: transparent !important;
     color: #f0f0f0 !important;
+    border: 1px solid #333 !important;
+    border-radius: 6px !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
 }
+div[data-testid="stDownloadButton"] > button:hover { border-color: #666 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Session state init ─────────────────────────────────
-def init_state():
-    defaults = {
-        "view": "upload",
-        "active_section": None,
-        "paper_data": None,
-        "results": {},
-        "final_score": None,
-        "summary": None,
-        "keywords": None,
-        "structure": None,
-        "analysis_time": None,
-        "uploaded_file": None,
-        "analysis_errors": [],
-    }
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def score_color(score: float) -> str:
+    if score >= 80: return "#4ade80"
+    if score >= 60: return "#fbbf24"
+    return "#f87171"
 
-init_state()
+def score_badge_class(score: float) -> str:
+    if score >= 80: return "good"
+    if score >= 60: return "mid"
+    return "low"
 
-# ── Helpers ────────────────────────────────────────────
-def score_color(score):
-    if score is None:
-        return "#555555"
-    if score >= 80:
-        return "#4ade80"
-    elif score >= 60:
-        return "#fbbf24"
-    else:
-        return "#f87171"
-
-def grade_color(grade):
-    return {"A": "#4ade80", "B": "#fbbf24",
-            "C": "#fbbf24", "D": "#f87171"}.get(grade, "#555")
-
-def verdict_color(verdict):
-    m = {
-        "Accept": "#4ade80",
-        "Minor Revision": "#fbbf24",
-        "Major Revision": "#f87171",
-        "Reject": "#f87171"
-    }
-    return m.get(verdict, "#555")
-
-def chip_html(label, found):
+def chip(label: str, found: bool) -> str:
     if found:
-        return (
-            f'<span style="display:inline-block;padding:3px 10px;'
-            f'background:#1a2e1a;color:#4ade80;border:1px solid #2d5a2d;'
-            f'border-radius:20px;font-size:11px;font-weight:500;">'
-            f'{label}</span>'
-        )
-    else:
-        return (
-            f'<span style="display:inline-block;padding:3px 10px;'
-            f'background:#2a1a1a;color:#f87171;border:1px solid #5a2d2d;'
-            f'border-radius:20px;font-size:11px;font-weight:500;">'
-            f'missing</span>'
-        )
+        return f'<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(74,222,128,0.08);color:#4ade80;border:1px solid rgba(74,222,128,0.2);border-radius:4px;padding:3px 8px;font-size:11px;margin:2px;">✓ {label}</span>'
+    return f'<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(248,113,113,0.08);color:#f87171;border:1px solid rgba(248,113,113,0.2);border-radius:4px;padding:3px 8px;font-size:11px;margin:2px;">✗ {label}</span>'
 
-def bar_chart_html(sections_scores):
+def card(content: str, padding: str = "18px 22px") -> str:
+    return f'<div style="background:#161616;border:1px solid #2a2a2a;border-radius:10px;padding:{padding};margin-bottom:14px;">{content}</div>'
+
+def card_title(text: str) -> str:
+    return f'<div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#555;font-weight:500;margin-bottom:12px;">{text}</div>'
+
+def mono(val, size: int = 28, color: str = "#f0f0f0") -> str:
+    return f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:{size}px;font-weight:500;color:{color};">{val}</span>'
+
+def section_bar_chart(sections: list) -> str:
     rows = ""
-    for name, score in sections_scores.items():
-        color = score_color(score)
+    for name, score in sections:
+        c = score_color(score)
         pct = min(score, 100)
         rows += f"""
-        <div style="display:flex;align-items:center;gap:12px;
-                    margin-bottom:10px;">
-            <div style="width:110px;font-size:12px;color:#999;
-                        text-align:right;flex-shrink:0;">{name}</div>
-            <div style="flex:1;background:#252525;border-radius:3px;
-                        height:6px;overflow:hidden;">
-                <div style="width:{pct}%;height:100%;
-                            background:{color};border-radius:3px;
-                            transition:width 0.6s ease;"></div>
-            </div>
-            <div style="width:28px;font-size:12px;color:{color};
-                        font-family:'JetBrains Mono',monospace;
-                        font-weight:600;flex-shrink:0;">{int(score)}</div>
-        </div>
-        """
-    return f"""
-    <div style="padding:4px 0;">
-        <div style="font-size:10px;color:#555;letter-spacing:0.08em;
-                    font-weight:600;margin-bottom:14px;">SECTION SCORES</div>
-        {rows}
-    </div>
-    """
+        <div style="display:grid;grid-template-columns:120px 1fr 36px;align-items:center;gap:12px;margin-bottom:10px;">
+          <span style="font-size:12px;color:#999;">{name}</span>
+          <div style="background:#252525;height:4px;border-radius:2px;overflow:hidden;">
+            <div style="background:{c};width:{pct}%;height:100%;border-radius:2px;"></div>
+          </div>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;color:{c};text-align:right;">{round(score)}</span>
+        </div>"""
+    return rows
 
-def feedback_html(items):
-    if not items:
-        return ""
-    rows = ""
-    for item in items[:8]:
-        item_lower = item.lower()
-        if any(w in item_lower for w in
-               ["missing", "no ", "not found", "absent", "low", "fail",
-                "error", "issue", "problem", "too short", "too long"]):
-            icon = "⚠"
-            color = "#fbbf24"
-            dot_bg = "#2a2200"
-        elif any(w in item_lower for w in
-                 ["excellent", "good", "strong", "well", "found",
-                  "present", "correct", "complete"]):
-            icon = "✓"
-            color = "#4ade80"
-            dot_bg = "#0a2a0a"
-        else:
-            icon = "⬜"
-            color = "#f87171"
-            dot_bg = "#2a0a0a"
+def get_all_feedback(results: dict) -> list:
+    """Collect real feedback from all modules, sorted by severity."""
+    items = []
+    for module_key, result in results.items():
+        if not isinstance(result, dict):
+            continue
+        for fb in result.get("feedback", []):
+            if not fb:
+                continue
+            if any(w in fb.lower() for w in ["missing", "not found", "absent", "no ", "lacks", "low", "weak", "poor"]):
+                items.append({"text": fb, "sev": 0, "color": "#fbbf24", "icon": "⚠"})
+            elif any(w in fb.lower() for w in ["error", "fail", "critical", "invalid", "radically"]):
+                items.append({"text": fb, "sev": -1, "color": "#f87171", "icon": "✗"})
+            else:
+                items.append({"text": fb, "sev": 1, "color": "#4ade80", "icon": "✓"})
+        for w in result.get("warnings", []):
+            if w:
+                items.append({"text": w, "sev": -1, "color": "#f87171", "icon": "✗"})
+    items.sort(key=lambda x: x["sev"])
+    return items[:10]
 
-        rows += f"""
-        <div style="display:flex;align-items:flex-start;gap:10px;
-                    padding:10px 0;border-bottom:1px solid #1e1e1e;">
-            <span style="color:{color};font-size:13px;
-                         margin-top:1px;flex-shrink:0;">{icon}</span>
-            <span style="font-size:13px;color:#d0d0d0;
-                         line-height:1.5;">{item}</span>
-        </div>
-        """
-    return f'<div style="padding:0;">{rows}</div>'
+def generate_pdf_report(paper_data: dict, results: dict, final_score: dict) -> bytes:
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib import colors
+        import io
 
-def keyword_pills_html(keywords):
-    pills = ""
-    for kw in keywords[:12]:
-        pills += (
-            f'<span style="display:inline-block;padding:5px 12px;'
-            f'background:#1e1e1e;color:#999;border:1px solid #2a2a2a;'
-            f'border-radius:20px;font-size:12px;margin:4px 3px;">'
-            f'{kw}</span>'
-        )
-    return f'<div style="padding:4px 0;">{pills}</div>'
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=50, rightMargin=50, topMargin=50, bottomMargin=50)
+        styles = getSampleStyleSheet()
+        story = []
 
-def card(content_html, padding="20px"):
-    return f"""
-    <div style="background:#161616;border:1px solid #2a2a2a;
-                border-radius:10px;padding:{padding};
-                margin-bottom:12px;">
-        {content_html}
-    </div>
-    """
+        h1 = ParagraphStyle("h1", parent=styles["Heading1"], fontSize=16, spaceAfter=6, fontName="Helvetica-Bold")
+        h2 = ParagraphStyle("h2", parent=styles["Heading2"], fontSize=12, spaceAfter=4, fontName="Helvetica-Bold")
+        body = ParagraphStyle("body", parent=styles["Normal"], fontSize=10, spaceAfter=4, fontName="Helvetica")
+        muted = ParagraphStyle("muted", parent=styles["Normal"], fontSize=9, textColor=colors.grey, fontName="Helvetica")
 
-def section_label(text):
-    return (
-        f'<div style="font-size:10px;color:#555;letter-spacing:0.08em;'
-        f'font-weight:600;margin-bottom:12px;">{text}</div>'
-    )
+        story.append(Paragraph("Research2Review — Evaluation Report", h1))
+        story.append(Paragraph(paper_data.get("title", "Untitled Paper"), h2))
+        story.append(Paragraph(f"Paper type: {paper_data.get('paper_type', 'Unknown')}  ·  "
+                                f"Pages: {paper_data.get('page_count', '—')}  ·  "
+                                f"Words: {paper_data.get('total_words', '—')}", muted))
+        story.append(Spacer(1, 12))
 
-# ── Analysis runner ────────────────────────────────────
-def run_analysis(paper_data, progress_placeholder):
+        score = final_score.get("total_score", 0)
+        grade = final_score.get("grade", "—")
+        verdict = final_score.get("verdict", "—")
+        story.append(Paragraph(f"Overall Score: {score:.1f} / 100  ·  Grade: {grade}  ·  Verdict: {verdict}", body))
+        story.append(Spacer(1, 12))
+
+        story.append(Paragraph("Section Scores", h2))
+        table_data = [["Section", "Score", "Max", "%"]]
+        for item in final_score.get("score_breakdown", []):
+            pct = f"{item.get('percentage', 0):.0f}%"
+            table_data.append([
+                item.get("display_name", ""),
+                f"{item.get('raw_score', 0):.0f}",
+                "100",
+                pct
+            ])
+        if len(table_data) > 1:
+            t = Table(table_data, colWidths=[220, 60, 60, 60])
+            t.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#222222")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8f8f8")]),
+                ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#dddddd")),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ]))
+            story.append(t)
+
+        story.append(Spacer(1, 12))
+        story.append(Paragraph("Feedback", h2))
+        for item in get_all_feedback(results)[:8]:
+            story.append(Paragraph(f"{item['icon']}  {item['text']}", body))
+
+        doc.build(story)
+        return buf.getvalue()
+    except Exception:
+        return b""
+
+# ── Analysis runner ───────────────────────────────────────────────────────────
+def run_analysis(uploaded_file) -> None:
+    os.makedirs("./data/tmp", exist_ok=True)
+    tmp_path = "./data/tmp/active_paper.pdf"
+    with open(tmp_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+
+    start = time.time()
+    st.session_state["failed_modules"] = []
     results = {}
-    errors = []
+
+    progress = st.progress(0)
+    log = st.empty()
+
     steps = [
-        ("abstract",     "Analyzing abstract",       "abstract"),
-        ("introduction", "Analyzing introduction",    "introduction"),
-        ("literature",   "Reviewing literature",      "literature"),
-        ("methodology",  "Checking methodology",      "methodology"),
-        ("results",      "Checking results",          "results"),
-        ("discussion",   "Evaluating discussion",     "discussion"),
-        ("conclusion",   "Evaluating conclusion",     "conclusion"),
-        ("gaps",         "Finding research gaps",     "gaps"),
-        ("structure",    "Checking structure",        "structure"),
-        ("keywords",     "Extracting keywords",       "keywords"),
+        ("Extracting PDF text", "pdf"),
+        ("Analyzing abstract", "abstract"),
+        ("Analyzing introduction", "introduction"),
+        ("Reviewing literature", "literature"),
+        ("Checking methodology", "methodology"),
+        ("Checking results", "results"),
+        ("Evaluating discussion", "discussion"),
+        ("Evaluating conclusion", "conclusion"),
+        ("Finding research gaps", "gaps"),
+        ("Computing final score", "score"),
+        ("Generating summary", "summary"),
     ]
 
-    total = len(steps) + 2
-    done_steps = []
+    completed = []
 
-    def render_progress(current_label, pct):
-        lines = ""
-        for s in done_steps:
-            lines += (
-                f'<div style="display:flex;align-items:center;gap:10px;'
-                f'padding:6px 0;color:#4ade80;font-size:13px;">'
-                f'<span>✓</span><span>{s}</span></div>'
-            )
-        lines += (
-            f'<div style="display:flex;align-items:center;gap:10px;'
-            f'padding:6px 0;color:#999;font-size:13px;">'
-            f'<span style="opacity:0.4;">◌</span>'
-            f'<span>{current_label}...</span></div>'
-        )
-        progress_placeholder.markdown(
-            f'<div style="background:#161616;border:1px solid #2a2a2a;'
-            f'border-radius:10px;padding:24px;">'
-            f'{lines}</div>',
+    for i, (label, key) in enumerate(steps):
+        done_html = "".join([
+            f'<div style="font-size:12px;color:#4ade80;padding:3px 0;">✓ {s}</div>'
+            for s in completed
+        ])
+        log.markdown(
+            f'{done_html}'
+            f'<div style="font-size:12px;color:#f0f0f0;padding:3px 0;">→ {label}...</div>',
             unsafe_allow_html=True
         )
 
-    for i, (key, label, mod_key) in enumerate(steps):
-        render_progress(label, int((i / total) * 100))
-        t0 = time.time()
         try:
-            if key == "abstract" and MODULES_AVAILABLE.get("abstract"):
-                results["abstract"] = analyze_abstract(paper_data)
-            elif key == "introduction" and MODULES_AVAILABLE.get("introduction"):
-                results["introduction"] = analyze_introduction(paper_data)
-            elif key == "literature" and MODULES_AVAILABLE.get("literature"):
-                results["literature"] = analyze_literature(paper_data)
-            elif key == "methodology" and MODULES_AVAILABLE.get("methodology"):
-                results["methodology"] = analyze_methodology(paper_data)
-            elif key == "results" and MODULES_AVAILABLE.get("results"):
-                results["results"] = analyze_results(paper_data)
-            elif key == "discussion" and MODULES_AVAILABLE.get("discussion"):
-                results["discussion"] = evaluate_discussion(paper_data)
-            elif key == "conclusion" and MODULES_AVAILABLE.get("conclusion"):
-                results["conclusion"] = evaluate_conclusion(paper_data)
-            elif key == "gaps" and MODULES_AVAILABLE.get("gaps"):
-                results["gaps"] = analyze_gaps(paper_data)
-            elif key == "structure" and MODULES_AVAILABLE.get("structure"):
-                results["structure"] = check_structure(paper_data)
-            elif key == "keywords" and MODULES_AVAILABLE.get("keywords"):
-                results["keywords"] = analyze_keywords(paper_data)
+            if key == "pdf":
+                paper_data = extract_paper(tmp_path)
+                st.session_state["paper_data"] = paper_data
+            elif key == "abstract":
+                results["abstract"] = analyze_abstract(st.session_state["paper_data"])
+            elif key == "introduction":
+                results["introduction"] = analyze_introduction(st.session_state["paper_data"])
+            elif key == "literature":
+                results["literature"] = analyze_literature(st.session_state["paper_data"])
+            elif key == "methodology":
+                results["methodology"] = analyze_methodology(st.session_state["paper_data"])
+            elif key == "results":
+                results["results"] = analyze_results(st.session_state["paper_data"])
+            elif key == "discussion":
+                results["discussion"] = evaluate_discussion(st.session_state["paper_data"])
+            elif key == "conclusion":
+                results["conclusion"] = evaluate_conclusion(st.session_state["paper_data"])
+            elif key == "gaps":
+                results["gaps"] = analyze_gaps(st.session_state["paper_data"])
+            elif key == "score":
+                st.session_state["final_score"] = aggregate_scores(results)
+                st.session_state["results"] = results
+            elif key == "summary":
+                st.session_state["summary"] = summarize_paper(st.session_state["paper_data"])
         except Exception as e:
-            errors.append(f"{label} failed: {str(e)[:60]}")
-            results[key] = {"error": str(e), "scores": {
-                "total_score": 0, "max_score": 10}}
+            st.session_state["failed_modules"].append(label)
 
-        done_steps.append(label)
+        completed.append(label)
+        progress.progress(int((i + 1) / len(steps) * 100))
 
-    # Scoring
-    render_progress("Computing final score", 90)
-    try:
-        def safe_score(key, max_s):
-            r = results.get(key, {})
-            s = r.get("scores", r.get("score", {}))
-            if isinstance(s, dict):
-                return {
-                    "total_score": s.get("total_score", s.get("score", 0)),
-                    "max_score": s.get("max_score", max_s)
-                }
-            return {"total_score": 0, "max_score": max_s}
+    st.session_state["analysis_time"] = round(time.time() - start, 1)
+    st.session_state["view"] = "overview"
+    st.rerun()
 
-        module_scores = {
-            "structure":    safe_score("structure", 15),
-            "abstract":     safe_score("abstract", 10),
-            "introduction": safe_score("introduction", 10),
-            "literature":   safe_score("literature", 8),
-            "methodology":  safe_score("methodology", 15),
-            "results":      safe_score("results", 12),
-            "discussion":   safe_score("discussion", 8),
-            "conclusion":   safe_score("conclusion", 5),
-            "grammar":      {"total_score": 0, "max_score": 10},
-            "vocabulary":   {"total_score": 0, "max_score": 7},
-        }
-        final = aggregate_scores(module_scores)
-        results["final"] = final
-    except Exception as e:
-        errors.append(f"Scoring failed: {str(e)[:60]}")
-        results["final"] = {
-            "total_score": 0, "grade": "D",
-            "verdict": "Error", "weighted_scores": {},
-            "improvement_priorities": [], "summary_feedback": "",
-            "score_breakdown": []
-        }
-
-    # Summary
-    render_progress("Generating summary", 96)
-    try:
-        kws = []
-        if results.get("keywords"):
-            kws = results["keywords"].get("overall_keywords", [])[:15]
-        results["summary_data"] = summarize_paper(paper_data, kws)
-    except Exception as e:
-        errors.append(f"Summary failed: {str(e)[:60]}")
-
-    done_steps.append("Generating summary")
-    render_progress("Done", 100)
-    return results, errors
-
-# ── Sidebar ────────────────────────────────────────────
-def render_sidebar():
-    final = st.session_state.get("final_score") or \
-            st.session_state.get("results", {}).get("final", {})
+# ── TOPBAR ────────────────────────────────────────────────────────────────────
+def render_topbar(show_nav: bool = False):
     paper = st.session_state.get("paper_data", {})
-    active = st.session_state.get("active_section", "overview")
+    title = paper.get("title", "")
+    truncated = (title[:40] + "…") if len(title) > 40 else title
 
-    section_scores = {}
-    results = st.session_state.get("results", {})
-    for mod in ["abstract", "introduction", "literature",
-                "methodology", "results", "discussion", "conclusion"]:
-        r = results.get(mod, {})
-        s = r.get("scores", r.get("score", {}))
-        if isinstance(s, dict):
-            raw = s.get("total_score", s.get("score", 0))
-            mx = s.get("max_score", 10)
-            section_scores[mod] = round((raw / mx * 100) if mx else 0, 1)
-        else:
-            section_scores[mod] = 0
+    nav_html = ""
+    if show_nav:
+        sections = [
+            ("Overview", "overview"),
+            ("Abstract", "abstract"),
+            ("Introduction", "introduction"),
+            ("Literature", "literature"),
+            ("Methodology", "methodology"),
+            ("Results", "results"),
+            ("Discussion", "discussion"),
+            ("Conclusion", "conclusion"),
+            ("Gaps", "gaps"),
+            ("Summary", "summary"),
+        ]
+        results = st.session_state.get("results", {})
+        final_score = st.session_state.get("final_score", {})
+        active = st.session_state.get("active_section", "overview")
+        nav_items = ""
+        for label, key in sections:
+            score_str = ""
+            if key in results and isinstance(results[key], dict):
+                s = results[key].get("total_score")
+                if s is not None:
+                    c = score_color(s)
+                    score_str = f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:{c};margin-left:4px;">{round(s)}</span>'
+            is_active = active == key
+            bg = "#252525" if is_active else "transparent"
+            color = "#f0f0f0" if is_active else "#666"
+            nav_items += f'<a href="?section={key}" style="display:flex;align-items:center;gap:2px;padding:5px 10px;border-radius:5px;font-size:12px;color:{color};text-decoration:none;background:{bg};white-space:nowrap;">{label}{score_str}</a>'
+        nav_html = f'<div style="display:flex;align-items:center;gap:2px;overflow-x:auto;">{nav_items}</div>'
 
-    def nav_item(label, key, score=None):
-        is_active = (active == key)
-        bg = "#252525" if is_active else "transparent"
-        color = "#f0f0f0" if is_active else "#999"
-        score_html = ""
-        if score is not None:
-            sc = score_color(score)
-            score_html = (
-                f'<span style="font-family:JetBrains Mono,monospace;'
-                f'font-size:11px;color:{sc};font-weight:600;">'
-                f'{int(score)}</span>'
-            )
-        return (
-            f'<div onclick="" style="display:flex;justify-content:space-between;'
-            f'align-items:center;padding:7px 10px;border-radius:6px;'
-            f'background:{bg};cursor:pointer;margin-bottom:2px;">'
-            f'<span style="font-size:13px;color:{color};">{label}</span>'
-            f'{score_html}</div>'
-        )
-
-    title = paper.get("title", "No paper loaded")
-    if len(title) > 28:
-        title = title[:28] + "…"
-    ptype = paper.get("paper_type", "").upper()
-
-    sidebar_html = f"""
-    <div style="width:220px;height:100vh;background:#161616;
-                border-right:1px solid #2a2a2a;padding:16px 12px;
-                position:fixed;top:0;left:0;z-index:100;
-                overflow-y:auto;display:flex;flex-direction:column;gap:0;">
-
-        <div style="padding:4px 0 16px 0;">
-            <div style="font-size:15px;font-weight:700;color:#fff;
-                        letter-spacing:-0.02em;">Research2Review</div>
-            <div style="font-size:10px;color:#555;margin-top:1px;">/ r2r</div>
+    st.markdown(f"""
+    <div style="display:flex;align-items:center;justify-content:space-between;
+                padding:0 24px;height:48px;background:#0e0e0e;
+                border-bottom:1px solid #1e1e1e;position:sticky;top:0;z-index:100;">
+      <div style="display:flex;align-items:center;gap:16px;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="width:22px;height:22px;background:#f0f0f0;border-radius:4px;
+                      display:flex;align-items:center;justify-content:center;font-size:11px;color:#0e0e0e;font-weight:700;">R</div>
+          <span style="font-size:14px;font-weight:500;color:#f0f0f0;letter-spacing:-0.2px;">Research2Review</span>
+          <span style="font-size:14px;color:#333;">/</span>
+          <span style="font-size:13px;color:#555;">{truncated}</span>
         </div>
-
-        <div style="border-top:1px solid #2a2a2a;padding:14px 0 10px 0;">
-            <div style="font-size:12px;color:#ccc;font-weight:600;
-                        white-space:nowrap;overflow:hidden;
-                        text-overflow:ellipsis;">{title}</div>
-            <div style="display:inline-block;margin-top:5px;padding:2px 8px;
-                        background:#1e1e1e;border:1px solid #333;
-                        border-radius:4px;font-size:10px;
-                        color:#777;">{ptype}</div>
-        </div>
-
-        <div style="border-top:1px solid #2a2a2a;padding:10px 0;">
-            <div style="font-size:10px;color:#555;letter-spacing:0.08em;
-                        font-weight:600;margin-bottom:8px;padding-left:4px;">
-                SECTIONS</div>
-            {nav_item("Overview", "overview")}
-            {nav_item("Abstract", "abstract",
-                      section_scores.get("abstract"))}
-            {nav_item("Introduction", "introduction",
-                      section_scores.get("introduction"))}
-            {nav_item("Literature", "literature",
-                      section_scores.get("literature"))}
-            {nav_item("Methodology", "methodology",
-                      section_scores.get("methodology"))}
-            {nav_item("Results", "results",
-                      section_scores.get("results"))}
-            {nav_item("Discussion", "discussion",
-                      section_scores.get("discussion"))}
-            {nav_item("Conclusion", "conclusion",
-                      section_scores.get("conclusion"))}
-        </div>
-
-        <div style="border-top:1px solid #2a2a2a;padding:10px 0;">
-            <div style="font-size:10px;color:#555;letter-spacing:0.08em;
-                        font-weight:600;margin-bottom:8px;padding-left:4px;">
-                ANALYSIS</div>
-            {nav_item("Research Gaps", "gaps")}
-            {nav_item("Summary", "summary")}
-            {nav_item("Improvements", "improvements")}
-        </div>
-    </div>
-    """
-    return sidebar_html
-
-# ── View: UPLOAD ───────────────────────────────────────
-def view_upload():
-    st.markdown("""
-    <div style="position:fixed;top:16px;left:20px;z-index:200;">
-        <span style="font-size:14px;font-weight:700;color:#fff;">R2R</span>
-        <span style="font-size:11px;color:#555;margin-left:8px;">
-            research paper evaluator</span>
-    </div>
-    <div style="position:fixed;top:12px;right:20px;z-index:200;
-                display:flex;gap:8px;align-items:center;">
-        <span style="padding:4px 12px;background:#1a2a1a;
-                     color:#4ade80;border:1px solid #2d5a2d;
-                     border-radius:20px;font-size:11px;">offline mode</span>
-        <span style="padding:4px 12px;background:#1e1e1e;
-                     color:#777;border:1px solid #2a2a2a;
-                     border-radius:20px;font-size:11px;">v1.0.0</span>
+      </div>
+      {nav_html}
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+        <span style="font-size:11px;padding:3px 8px;border-radius:12px;background:#0d1f15;color:#4ade80;border:1px solid #1a3a2a;">● offline</span>
+        <span style="font-size:11px;padding:3px 8px;border-radius:12px;background:#1e1e1e;color:#555;border:1px solid #2a2a2a;">v1.0</span>
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
+# ── VIEW: UPLOAD ──────────────────────────────────────────────────────────────
+def view_upload():
+    render_topbar()
     st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
 
-    _, col, _ = st.columns([1, 2, 1])
+    _, col, _ = st.columns([1, 1.4, 1])
     with col:
         st.markdown("""
-        <div style="text-align:center;margin-bottom:32px;">
-            <div style="font-size:32px;font-weight:700;color:#fff;
-                        letter-spacing:-0.03em;margin-bottom:10px;">
-                Evaluate your research paper</div>
-            <div style="font-size:14px;color:#666;line-height:1.6;">
-                Fully offline &nbsp;·&nbsp; ML-powered &nbsp;·&nbsp;
-                No data leaves your machine</div>
+        <div style="text-align:center;margin-bottom:40px;">
+          <h1 style="font-size:26px;font-weight:600;color:#f0f0f0;letter-spacing:-0.5px;margin-bottom:8px;">
+            Evaluate your research paper
+          </h1>
+          <p style="font-size:13px;color:#555;margin:0;">
+            Fully offline · ML-powered · No data leaves your machine
+          </p>
         </div>
         """, unsafe_allow_html=True)
 
         uploaded = st.file_uploader(
-            "Upload PDF",
+            "Drop a PDF here or click to browse",
             type=["pdf"],
-            key="file_upload_widget",
-            label_visibility="collapsed"
+            key="pdf_upload"
         )
 
         if uploaded:
-            size_kb = round(uploaded.size / 1024, 1)
+            st.session_state["uploaded_file"] = uploaded
+            size_kb = len(uploaded.getvalue()) // 1024
+            size_str = f"{size_kb / 1024:.1f} MB" if size_kb > 1024 else f"{size_kb} KB"
             st.markdown(f"""
-            <div style="background:#161616;border:1px solid #2a2a2a;
-                        border-radius:8px;padding:14px 18px;
-                        display:flex;justify-content:space-between;
-                        align-items:center;margin:12px 0;">
-                <div>
-                    <div style="font-size:13px;color:#f0f0f0;
-                                font-weight:500;">{uploaded.name}</div>
-                    <div style="font-size:11px;color:#555;
-                                margin-top:3px;">{size_kb} KB</div>
-                </div>
-                <div style="width:8px;height:8px;background:#4ade80;
-                            border-radius:50%;"></div>
+            <div style="background:#161616;border:1px solid #2a2a2a;border-radius:6px;
+                        padding:10px 14px;margin:12px 0;display:flex;
+                        justify-content:space-between;align-items:center;">
+              <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#f0f0f0;
+                           overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px;">
+                {uploaded.name}
+              </span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#555;">{size_str}</span>
             </div>
             """, unsafe_allow_html=True)
 
-            st.session_state["uploaded_file"] = uploaded
-            if st.button("Analyze Paper", use_container_width=True):
+            if st.button("Analyze paper", use_container_width=True):
                 st.session_state["view"] = "analyzing"
                 st.rerun()
 
+        st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
         st.markdown("""
-        <div style="display:flex;justify-content:center;gap:10px;
-                    margin-top:28px;flex-wrap:wrap;">
-            <span style="padding:6px 14px;background:#1e1e1e;
-                         color:#777;border:1px solid #2a2a2a;
-                         border-radius:20px;font-size:12px;">
-                7 section modules</span>
-            <span style="padding:6px 14px;background:#1e1e1e;
-                         color:#777;border:1px solid #2a2a2a;
-                         border-radius:20px;font-size:12px;">
-                NLI-powered</span>
-            <span style="padding:6px 14px;background:#1e1e1e;
-                         color:#777;border:1px solid #2a2a2a;
-                         border-radius:20px;font-size:12px;">
-                Instant PDF report</span>
+        <div style="display:flex;justify-content:center;gap:8px;margin-bottom:48px;">
+          <span style="font-size:11px;padding:4px 10px;border-radius:20px;background:#161616;
+                       color:#555;border:1px solid #2a2a2a;">7 section modules</span>
+          <span style="font-size:11px;padding:4px 10px;border-radius:20px;background:#161616;
+                       color:#555;border:1px solid #2a2a2a;">NLI-powered scoring</span>
+          <span style="font-size:11px;padding:4px 10px;border-radius:20px;background:#161616;
+                       color:#555;border:1px solid #2a2a2a;">Instant PDF report</span>
         </div>
         """, unsafe_allow_html=True)
 
-    machine = platform.machine()
-    st.markdown(f"""
-    <div style="position:fixed;bottom:20px;left:50%;
-                transform:translateX(-50%);
-                font-size:11px;color:#444;text-align:center;">
-        Running on {machine} &nbsp;·&nbsp; Models loaded locally
-    </div>
-    """, unsafe_allow_html=True)
-
-# ── View: ANALYZING ────────────────────────────────────
-def view_analyzing():
-    st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
-    _, col, _ = st.columns([1, 1.5, 1])
-    with col:
-        st.markdown("""
-        <div style="margin-bottom:24px;">
-            <div style="font-size:22px;font-weight:700;color:#fff;
-                        margin-bottom:6px;">Analyzing paper</div>
-            <div style="font-size:13px;color:#555;">
-                Models running on CPU — this may take 2–3 minutes</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        progress_ph = st.empty()
-
-        f = st.session_state["uploaded_file"]
-        with tempfile.NamedTemporaryFile(delete=False,
-                                         suffix=".pdf") as tmp:
-            tmp.write(f.read())
-            tmp_path = tmp.name
-
-        t_start = time.time()
-        try:
-            paper_data = extract_paper(tmp_path)
-        except Exception as e:
-            st.error(f"PDF extraction failed: {e}")
-            st.session_state["view"] = "upload"
-            st.rerun()
-            return
-
-        results, errors = run_analysis(paper_data, progress_ph)
-        elapsed = round(time.time() - t_start, 1)
-
-        st.session_state["paper_data"] = paper_data
-        st.session_state["results"] = results
-        st.session_state["final_score"] = results.get("final", {})
-        st.session_state["analysis_time"] = elapsed
-        st.session_state["analysis_errors"] = errors
-        st.session_state["view"] = "overview"
-        st.session_state["active_section"] = "overview"
-        os.unlink(tmp_path)
-        st.rerun()
-
-# ── View: OVERVIEW ─────────────────────────────────────
-def view_overview():
-    paper = st.session_state.get("paper_data", {})
-    results = st.session_state.get("results", {})
-    final = st.session_state.get("final_score", {})
-    elapsed = st.session_state.get("analysis_time", 0)
-    active = st.session_state.get("active_section", "overview")
-
-    # Sidebar buttons in actual st columns
-    with st.sidebar:
-        pass
-
-    # Layout: sidebar + main
-    sidebar_col, main_col = st.columns([1, 4.5])
-
-    with sidebar_col:
-        # Nav buttons
-        nav_sections = [
-            ("overview", "Overview", None),
-            ("abstract", "Abstract", None),
-            ("introduction", "Introduction", None),
-            ("literature", "Literature", None),
-            ("methodology", "Methodology", None),
-            ("results", "Results", None),
-            ("discussion", "Discussion", None),
-            ("conclusion", "Conclusion", None),
-            ("gaps", "Research Gaps", None),
-            ("summary", "Summary", None),
-            ("improvements", "Improvements", None),
-        ]
-
-        # Score lookup
-        def get_pct(mod):
-            r = results.get(mod, {})
-            s = r.get("scores", r.get("score", {}))
-            if isinstance(s, dict):
-                raw = s.get("total_score", s.get("score", 0))
-                mx = s.get("max_score", 10)
-                return round((raw / mx * 100) if mx else 0, 1)
-            return None
-
-        section_mods = ["abstract", "introduction", "literature",
-                        "methodology", "results",
-                        "discussion", "conclusion"]
-
-        title = paper.get("title", "Paper")
-        ptype = paper.get("paper_type", "").upper()
-
+        machine = platform.machine()
+        processor = platform.processor() or machine
         st.markdown(f"""
-        <div style="padding:8px 0 16px 0;">
-            <div style="font-size:13px;font-weight:700;color:#fff;">
-                Research2Review</div>
-            <div style="font-size:10px;color:#555;">/ r2r</div>
-        </div>
-        <div style="border-top:1px solid #2a2a2a;
-                    padding:12px 0 8px 0;">
-            <div style="font-size:12px;color:#ccc;font-weight:600;
-                        white-space:nowrap;overflow:hidden;
-                        text-overflow:ellipsis;max-width:160px;">
-                {title[:30]}{"…" if len(title) > 30 else ""}</div>
-            <div style="display:inline-block;margin-top:4px;
-                        padding:2px 8px;background:#1e1e1e;
-                        border:1px solid #333;border-radius:4px;
-                        font-size:10px;color:#777;">{ptype}</div>
-        </div>
-        <div style="height:8px;"></div>
-        <div style="font-size:10px;color:#555;letter-spacing:0.08em;
-                    font-weight:600;margin-bottom:6px;">SECTIONS</div>
-        """, unsafe_allow_html=True)
-
-        btn_sections = [
-            ("overview", "Overview"),
-            ("abstract", "Abstract"),
-            ("introduction", "Introduction"),
-            ("literature", "Literature"),
-            ("methodology", "Methodology"),
-            ("results", "Results"),
-            ("discussion", "Discussion"),
-            ("conclusion", "Conclusion"),
-        ]
-
-        for key, label in btn_sections:
-            score = get_pct(key) if key != "overview" else None
-            sc_txt = f" · {int(score)}" if score is not None else ""
-            is_active = active == key
-            bg = "#252525" if is_active else "transparent"
-            fc = "#fff" if is_active else "#888"
-            if st.button(
-                f"{label}{sc_txt}",
-                key=f"nav_{key}",
-                use_container_width=True
-            ):
-                st.session_state["active_section"] = key
-                st.rerun()
-
-        st.markdown("""
-        <div style="height:8px;border-top:1px solid #2a2a2a;
-                    padding-top:8px;margin-top:4px;">
-            <div style="font-size:10px;color:#555;
-                        letter-spacing:0.08em;font-weight:600;
-                        margin-bottom:6px;">ANALYSIS</div>
+        <div style="text-align:center;font-size:11px;color:#333;border-top:1px solid #1a1a1a;padding-top:16px;">
+          Running locally on {processor} · All models on-device
         </div>
         """, unsafe_allow_html=True)
 
-        for key, label in [("gaps", "Research Gaps"),
-                            ("summary", "Summary"),
-                            ("improvements", "Improvements")]:
-            if st.button(label, key=f"nav_{key}",
-                         use_container_width=True):
-                st.session_state["active_section"] = key
-                st.rerun()
+# ── VIEW: ANALYZING ───────────────────────────────────────────────────────────
+def view_analyzing():
+    render_topbar()
+    st.markdown("<div style='height:60px'></div>", unsafe_allow_html=True)
+    _, col, _ = st.columns([1, 1.4, 1])
+    with col:
+        st.markdown(card(
+            card_title("Running analysis") +
+            '<p style="font-size:13px;color:#555;margin:0 0 20px;">Models are running on CPU. This takes 2–4 minutes.</p>',
+            padding="22px 26px"
+        ), unsafe_allow_html=True)
+        run_analysis(st.session_state["uploaded_file"])
 
-        st.markdown("<div style='height:12px;'></div>",
-                    unsafe_allow_html=True)
+# ── VIEW: OVERVIEW ────────────────────────────────────────────────────────────
+def view_overview():
+    render_topbar(show_nav=True)
 
-        if st.button("↑ Upload new paper",
-                     key="upload_new",
-                     use_container_width=True):
-            for k in ["paper_data", "results",
-                      "final_score", "summary",
-                      "analysis_time", "uploaded_file"]:
-                st.session_state[k] = None
-            st.session_state["view"] = "upload"
-            st.session_state["results"] = {}
+    # Handle section nav via query params
+    params = st.query_params
+    if "section" in params:
+        sec = params["section"]
+        if sec != "overview":
+            st.session_state["active_section"] = sec
+            st.session_state["view"] = "detail"
+            st.query_params.clear()
             st.rerun()
 
-        # Export
-        if MODULES_AVAILABLE.get("report") and results:
-            if st.button("↓ Export PDF report",
-                         key="export_pdf",
-                         use_container_width=True):
-                try:
-                    rpt = generate_report(
-                        paper, results, final)
-                    st.success(f"Saved: {rpt.get('pdf_path','')}")
-                except Exception as e:
-                    st.error(str(e))
+    paper = st.session_state["paper_data"]
+    final = st.session_state["final_score"]
+    results = st.session_state["results"]
 
-    with main_col:
-        if active == "overview":
-            render_overview_main(paper, results, final, elapsed)
-        elif active in ["abstract", "introduction", "literature",
-                        "methodology", "results",
-                        "discussion", "conclusion"]:
-            render_section_detail(active, paper, results)
-        elif active == "gaps":
-            render_gaps_view(results)
-        elif active == "summary":
-            render_summary_view(results)
-        elif active == "improvements":
-            render_improvements_view(final)
-
-# ── Overview main content ──────────────────────────────
-def render_overview_main(paper, results, final, elapsed):
-    title = paper.get("title", "Untitled Paper")
-    pages = paper.get("page_count", 0)
-    words = paper.get("total_words", 0)
-    ptype = paper.get("paper_type", "unknown").capitalize()
-    total_score = final.get("total_score", 0)
+    total = final.get("total_score", 0)
     grade = final.get("grade", "—")
     verdict = final.get("verdict", "—")
-    n_sections = len(paper.get("sections", {}))
-    vc = verdict_color(verdict)
-    gc = grade_color(grade)
+    v_color = score_color(total)
 
-    # Header row
-    st.markdown(f"""
-    <div style="display:flex;justify-content:space-between;
-                align-items:flex-start;padding:24px 0 16px 0;
-                border-bottom:1px solid #2a2a2a;margin-bottom:20px;">
-        <div>
-            <div style="font-size:20px;font-weight:700;color:#fff;
-                        letter-spacing:-0.02em;">{title}</div>
-            <div style="font-size:12px;color:#666;margin-top:6px;">
-                {pages} pages &nbsp;·&nbsp; 
-                {words:,} words &nbsp;·&nbsp; 
-                {ptype} paper</div>
-        </div>
-        <div style="padding:6px 16px;border:1.5px solid {vc};
-                    border-radius:20px;font-size:12px;
-                    color:{vc};font-weight:600;white-space:nowrap;">
-            {verdict}</div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-    # Stat cards
-    def get_strongest():
-        best_name, best_score = "—", 0
-        mod_names = {
-            "abstract": "Abstract",
-            "introduction": "Introduction",
-            "literature": "Literature",
-            "methodology": "Methodology",
-            "results": "Results",
-            "discussion": "Discussion",
-            "conclusion": "Conclusion"
-        }
-        for mod, name in mod_names.items():
-            r = results.get(mod, {})
-            s = r.get("scores", r.get("score", {}))
-            if isinstance(s, dict):
-                raw = s.get("total_score", s.get("score", 0))
-                mx = s.get("max_score", 10)
-                pct = (raw / mx * 100) if mx else 0
-                if pct > best_score:
-                    best_score = pct
-                    best_name = name
-        return best_name, round(best_score, 1)
+    # ── Paper header
+    _, main_col, _ = st.columns([0.02, 0.96, 0.02])
+    with main_col:
+        left, right = st.columns([3, 1])
+        with left:
+            ptype = paper.get("paper_type", "Unknown").upper()
+            pages = paper.get("page_count", "—")
+            words = paper.get("total_words", "—")
+            t = paper.get("title", "Untitled Paper")
+            st.markdown(f"""
+            <div style="padding:20px 0 16px;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                <span style="font-size:10px;padding:2px 7px;border-radius:3px;background:#252525;
+                             color:#666;letter-spacing:0.5px;">{ptype}</span>
+              </div>
+              <h1 style="font-size:20px;font-weight:600;color:#f0f0f0;letter-spacing:-0.3px;
+                         margin:0 0 6px;line-height:1.3;">{t}</h1>
+              <span style="font-size:12px;color:#555;">{pages} pages · {words:,} words · {st.session_state['analysis_time']}s analysis</span>
+            </div>
+            """, unsafe_allow_html=True)
+        with right:
+            st.markdown(f"""
+            <div style="text-align:right;padding:20px 0 16px;">
+              <span style="font-size:11px;color:#555;display:block;margin-bottom:6px;">verdict</span>
+              <span style="font-size:13px;font-weight:500;padding:5px 14px;border-radius:4px;
+                           border:1px solid {v_color};color:{v_color};">{verdict}</span>
+            </div>
+            """, unsafe_allow_html=True)
 
-    strongest_name, strongest_score = get_strongest()
+        st.markdown('<div style="height:1px;background:#1e1e1e;margin-bottom:16px;"></div>', unsafe_allow_html=True)
 
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        sc_color = score_color(total_score)
-        st.markdown(f"""
-        <div style="background:#161616;border:1px solid #2a2a2a;
-                    border-radius:10px;padding:20px;">
-            <div style="font-size:11px;color:#555;
-                        margin-bottom:10px;">Overall Score</div>
-            <div style="font-family:'JetBrains Mono',monospace;
-                        font-size:32px;font-weight:700;
-                        color:{sc_color};">{total_score:.1f}</div>
-            <div style="font-size:11px;color:#555;
-                        margin-top:4px;">out of 100</div>
-        </div>
-        """, unsafe_allow_html=True)
+        # ── Stat cards
+        c1, c2, c3, c4 = st.columns(4)
+        for col_obj, label, val, sub, color in [
+            (c1, "overall score", mono(f"{total:.1f}", 28, score_color(total)), "out of 100", "#161616"),
+            (c2, "grade", mono(grade, 28, v_color), verdict.lower(), "#161616"),
+            (c3, "sections found", mono(len(paper.get("sections", {})), 28), paper.get("paper_type", "").lower(), "#161616"),
+            (c4, "analysis time", mono(f"{st.session_state['analysis_time']}s", 28), "on cpu", "#161616"),
+        ]:
+            with col_obj:
+                st.markdown(card(
+                    card_title(label) +
+                    f'<div style="margin-bottom:4px;">{val}</div>' +
+                    f'<div style="font-size:11px;color:#555;">{sub}</div>'
+                ), unsafe_allow_html=True)
 
-    with c2:
-        st.markdown(f"""
-        <div style="background:#161616;border:1px solid #2a2a2a;
-                    border-radius:10px;padding:20px;">
-            <div style="font-size:11px;color:#555;
-                        margin-bottom:10px;">Grade</div>
-            <div style="font-family:'JetBrains Mono',monospace;
-                        font-size:32px;font-weight:700;
-                        color:{gc};">{grade}</div>
-            <div style="font-size:11px;color:#555;margin-top:4px;">
-                {"above average" if total_score >= 70 else "needs work"}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with c3:
-        st.markdown(f"""
-        <div style="background:#161616;border:1px solid #2a2a2a;
-                    border-radius:10px;padding:20px;">
-            <div style="font-size:11px;color:#555;
-                        margin-bottom:10px;">Sections detected</div>
-            <div style="font-family:'JetBrains Mono',monospace;
-                        font-size:32px;font-weight:700;
-                        color:#f0f0f0;">{n_sections}</div>
-            <div style="font-size:11px;color:#555;
-                        margin-top:4px;">{ptype} paper</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with c4:
-        st.markdown(f"""
-        <div style="background:#161616;border:1px solid #2a2a2a;
-                    border-radius:10px;padding:20px;">
-            <div style="font-size:11px;color:#555;
-                        margin-bottom:10px;">Strongest section</div>
-            <div style="font-size:18px;font-weight:700;
-                        color:#f0f0f0;margin-top:4px;">
-                {strongest_name}</div>
-            <div style="font-size:11px;color:#4ade80;
-                        font-family:'JetBrains Mono',monospace;
-                        margin-top:6px;">{strongest_score} / 100</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("<div style='height:12px'></div>",
-                unsafe_allow_html=True)
-
-    # Section scores bar chart
-    section_scores = {}
-    display_names = {
-        "introduction": "Introduction",
-        "abstract": "Abstract",
-        "conclusion": "Conclusion",
-        "methodology": "Methodology",
-        "results": "Results",
-        "discussion": "Discussion",
-        "literature": "Literature",
-    }
-    for mod, name in display_names.items():
-        r = results.get(mod, {})
-        s = r.get("scores", r.get("score", {}))
-        if isinstance(s, dict):
-            raw = s.get("total_score", s.get("score", 0))
-            mx = s.get("max_score", 10)
-            section_scores[name] = round(
-                (raw / mx * 100) if mx else 0, 1)
-
-    sorted_scores = dict(
-        sorted(section_scores.items(),
-               key=lambda x: x[1], reverse=True))
-
-    st.markdown(
-        card(bar_chart_html(sorted_scores)),
-        unsafe_allow_html=True)
-
-    # Components row
-    col_abs, col_intro = st.columns(2)
-
-    with col_abs:
-        abs_result = results.get("abstract", {})
-        components = abs_result.get("components", {})
-        comp_list = [
-            "background and context",
-            "problem statement",
-            "proposed method",
-            "results and findings",
-            "conclusion and significance"
+        # ── Section bar chart
+        section_data = [
+            ("Introduction", results.get("introduction", {}).get("total_score", 0)),
+            ("Abstract",     results.get("abstract", {}).get("total_score", 0)),
+            ("Conclusion",   results.get("conclusion", {}).get("total_score", 0)),
+            ("Methodology",  results.get("methodology", {}).get("total_score", 0)),
+            ("Results",      results.get("results", {}).get("total_score", 0)),
+            ("Discussion",   results.get("discussion", {}).get("total_score", 0)),
+            ("Literature",   results.get("literature", {}).get("total_score", 0)),
         ]
-        labels = {
-            "background and context": "Background / context",
-            "problem statement": "Objective",
-            "proposed method": "Methodology",
-            "results and findings": "Results",
-            "conclusion and significance": "Conclusion"
-        }
-        rows = ""
-        for c in comp_list:
-            found = components.get(c, False)
-            lbl = labels.get(c, c.title())
-            rows += f"""
-            <div style="display:flex;justify-content:space-between;
-                        align-items:center;padding:8px 0;
-                        border-bottom:1px solid #1e1e1e;">
-                <span style="font-size:13px;color:#ccc;">{lbl}</span>
-                {chip_html(lbl, found)}
-            </div>
-            """
-        st.markdown(
-            card(section_label("ABSTRACT COMPONENTS") + rows),
-            unsafe_allow_html=True)
+        section_data = [(n, s) for n, s in section_data if s > 0]
+        section_data.sort(key=lambda x: x[1], reverse=True)
 
-    with col_intro:
-        intro_result = results.get("introduction", {})
-        intro_comps = intro_result.get("components", {})
-        intro_labels = [
-            ("background", "Background"),
-            ("problem_statement", "Problem statement"),
-            ("motivation", "Motivation"),
-            ("contribution", "Contribution"),
-            ("organization", "Paper organization"),
-        ]
-        rows2 = ""
-        for key, label in intro_labels:
-            found = intro_comps.get(key, False)
-            rows2 += f"""
-            <div style="display:flex;justify-content:space-between;
-                        align-items:center;padding:8px 0;
-                        border-bottom:1px solid #1e1e1e;">
-                <span style="font-size:13px;color:#ccc;">{label}</span>
-                {chip_html(label, found)}
-            </div>
-            """
-        st.markdown(
-            card(section_label("INTRODUCTION COMPONENTS") + rows2),
-            unsafe_allow_html=True)
+        st.markdown(card(
+            card_title("section scores") +
+            section_bar_chart(section_data)
+        ), unsafe_allow_html=True)
 
-    # Feedback
-    all_feedback = []
-    for mod in ["abstract", "introduction", "literature",
-                "methodology", "results",
-                "discussion", "conclusion", "structure"]:
-        fb = results.get(mod, {}).get("feedback", [])
-        all_feedback.extend(fb)
+        # ── Component checklists
+        left2, right2 = st.columns(2)
+        with left2:
+            abs_data = results.get("abstract", {})
+            comps = abs_data.get("components_found", {})
+            chips_html = "".join([chip(k.replace("_", " "), v) for k, v in comps.items()])
+            word_count = abs_data.get("word_count", "—")
+            score_val = abs_data.get("total_score", 0)
+            st.markdown(card(
+                card_title("abstract components") +
+                f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
+                f'<span style="font-size:12px;color:#555;">{word_count} words</span>'
+                f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:13px;color:{score_color(score_val)};">{round(score_val)}/100</span>'
+                f'</div>'
+                f'<div style="display:flex;flex-wrap:wrap;gap:2px;">{chips_html}</div>'
+            ), unsafe_allow_html=True)
 
-    if all_feedback:
-        st.markdown(
-            card(
-                section_label("FEEDBACK & SUGGESTIONS") +
-                feedback_html(all_feedback)
-            ),
-            unsafe_allow_html=True)
+        with right2:
+            intro_data = results.get("introduction", {})
+            comps2 = intro_data.get("components_found", {})
+            chips2_html = "".join([chip(k.replace("_", " "), v) for k, v in comps2.items()])
+            score_val2 = intro_data.get("total_score", 0)
+            sim = intro_data.get("abstract_intro_similarity", None)
+            sim_str = f"{sim:.2f} similarity" if sim else ""
+            st.markdown(card(
+                card_title("introduction components") +
+                f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
+                f'<span style="font-size:12px;color:#555;">{sim_str}</span>'
+                f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:13px;color:{score_color(score_val2)};">{round(score_val2)}/100</span>'
+                f'</div>'
+                f'<div style="display:flex;flex-wrap:wrap;gap:2px;">{chips2_html}</div>'
+            ), unsafe_allow_html=True)
 
-    # Keywords
-    kw_data = results.get("keywords", {})
-    kws = kw_data.get("overall_keywords", [])
-    if kws:
-        st.markdown(
-            card(
-                section_label("TOP KEYWORDS") +
-                keyword_pills_html(kws[:12])
-            ),
-            unsafe_allow_html=True)
+        # ── Feedback
+        all_fb = get_all_feedback(results)
+        fb_html = ""
+        for item in all_fb:
+            fb_html += f"""
+            <div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;
+                        border-bottom:1px solid #1e1e1e;font-size:12px;color:#bbb;line-height:1.5;">
+              <span style="color:{item['color']};flex-shrink:0;font-size:13px;margin-top:1px;">{item['icon']}</span>
+              <span>{item['text']}</span>
+            </div>"""
+        st.markdown(card(
+            card_title("feedback & suggestions") + fb_html
+        ), unsafe_allow_html=True)
 
-    # Status bar
-    mods_loaded = sum(1 for v in MODULES_AVAILABLE.values() if v)
-    errors = st.session_state.get("analysis_errors", [])
-    err_txt = (f"· {len(errors)} warning(s)" if errors else
-               "· Fully offline")
-    st.markdown(f"""
-    <div style="display:flex;justify-content:space-between;
-                align-items:center;padding:14px 0;
-                border-top:1px solid #1e1e1e;margin-top:8px;">
-        <div style="display:flex;gap:16px;align-items:center;">
-            <span style="font-size:11px;color:#555;">
-                <span style="color:#4ade80;">●</span>
-                &nbsp;NLI model loaded</span>
-            <span style="font-size:11px;color:#555;">
-                <span style="color:#4ade80;">●</span>
-                &nbsp;MiniLM loaded</span>
-            <span style="font-size:11px;color:#555;">
-                <span style="color:#4ade80;">●</span>
-                &nbsp;spaCy loaded</span>
-            <span style="font-size:11px;color:#4ade80;">
-                <span>●</span>&nbsp;{err_txt}</span>
+        # ── Keywords
+        gap_data = results.get("gaps", {})
+        keywords = gap_data.get("keywords", [])
+        if not keywords:
+            keywords = st.session_state.get("paper_data", {}).get("top_keywords", [])
+        if keywords:
+            kw_html = "".join([
+                f'<span style="font-size:11px;padding:3px 10px;border-radius:20px;'
+                f'background:#1e1e1e;color:#666;border:1px solid #2a2a2a;margin:3px;">{k}</span>'
+                for k in keywords[:12]
+            ])
+            st.markdown(card(
+                card_title("top keywords") +
+                f'<div style="display:flex;flex-wrap:wrap;gap:2px;">{kw_html}</div>'
+            ), unsafe_allow_html=True)
+
+        # ── Action buttons
+        left3, right3 = st.columns([1, 1])
+        with left3:
+            pdf_bytes = generate_pdf_report(
+                st.session_state["paper_data"],
+                st.session_state["results"],
+                st.session_state["final_score"]
+            )
+            if pdf_bytes:
+                st.download_button(
+                    "↓ Export PDF report",
+                    data=pdf_bytes,
+                    file_name="r2r_evaluation.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+        with right3:
+            if st.button("↑ Analyze another paper", use_container_width=True):
+                for k in ["paper_data", "results", "final_score", "summary", "uploaded_file"]:
+                    st.session_state[k] = {} if k != "uploaded_file" else None
+                st.session_state["view"] = "upload"
+                st.rerun()
+
+        # ── Status bar
+        failed = st.session_state.get("failed_modules", [])
+        failed_str = f" · ⚠ {len(failed)} module(s) failed" if failed else ""
+        st.markdown(f"""
+        <div style="margin-top:24px;padding:10px 0;border-top:1px solid #1a1a1a;
+                    display:flex;justify-content:space-between;font-size:11px;color:#333;">
+          <span>
+            <span style="color:#4ade80;">●</span> NLI model &nbsp;·&nbsp;
+            <span style="color:#4ade80;">●</span> MiniLM &nbsp;·&nbsp;
+            <span style="color:#4ade80;">●</span> spaCy &nbsp;·&nbsp;
+            fully offline{failed_str}
+          </span>
+          <span>Analysis complete · {st.session_state['analysis_time']}s</span>
         </div>
-        <div style="font-size:11px;color:#555;">
-            Analysis complete &nbsp;·&nbsp; {elapsed}s</div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
-# ── Section detail ─────────────────────────────────────
-def render_section_detail(section, paper, results):
-    result = results.get(section, {})
-    scores = result.get("scores", result.get("score", {}))
-    feedback = result.get("feedback", [])
+# ── VIEW: DETAIL ──────────────────────────────────────────────────────────────
+def view_detail():
+    render_topbar(show_nav=True)
 
-    if isinstance(scores, dict):
-        raw = scores.get("total_score", scores.get("score", 0))
-        mx = scores.get("max_score", 10)
-        pct = round((raw / mx * 100) if mx else 0, 1)
-    else:
-        pct = 0
+    params = st.query_params
+    if "section" in params:
+        sec = params["section"]
+        st.session_state["active_section"] = sec
+        st.query_params.clear()
 
-    sc = score_color(pct)
-    section_text = ""
-    sections = paper.get("sections", {})
-    for k, v in sections.items():
-        if k.lower() == section or section in k.lower():
-            section_text = v.get("text", "")[:300]
-            break
+    section = st.session_state.get("active_section", "overview")
+    results = st.session_state["results"]
 
-    if st.button("← Overview", key="back_btn"):
-        st.session_state["active_section"] = "overview"
-        st.rerun()
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    _, col, _ = st.columns([0.02, 0.96, 0.02])
 
-    st.markdown(f"""
-    <div style="display:flex;align-items:center;gap:16px;
-                padding:20px 0 16px 0;
-                border-bottom:1px solid #2a2a2a;
-                margin-bottom:20px;">
-        <div style="width:56px;height:56px;border-radius:50%;
-                    border:2px solid {sc};
-                    display:flex;align-items:center;
-                    justify-content:center;
-                    font-family:'JetBrains Mono',monospace;
-                    font-size:16px;font-weight:700;
-                    color:{sc};">{int(pct)}</div>
-        <div>
-            <div style="font-size:20px;font-weight:700;color:#fff;">
-                {section.title()}</div>
-            <div style="font-size:12px;color:#555;margin-top:3px;">
-                Score: {pct}/100</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    with col:
+        if st.button("← Back to overview"):
+            st.session_state["view"] = "overview"
+            st.session_state["active_section"] = "overview"
+            st.rerun()
 
-    if feedback:
-        st.markdown(
-            card(
-                section_label("FEEDBACK") +
-                feedback_html(feedback)
-            ),
-            unsafe_allow_html=True)
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-    if section_text:
-        st.markdown(
-            card(
-                section_label("SECTION PREVIEW") +
-                f'<div style="font-family:JetBrains Mono,monospace;'
-                f'font-size:11px;color:#777;line-height:1.7;'
-                f'white-space:pre-wrap;">{section_text}...</div>'
-            ),
-            unsafe_allow_html=True)
+        # ── Summary view
+        if section == "summary":
+            summ = st.session_state.get("summary", {})
+            st.markdown(card(
+                card_title("tl;dr") +
+                f'<p style="font-size:13px;color:#bbb;line-height:1.7;margin:0;">'
+                f'{summ.get("tldr", "Summary not available.")}</p>'
+            ), unsafe_allow_html=True)
 
-# ── Gaps view ──────────────────────────────────────────
-def render_gaps_view(results):
-    gaps = results.get("gaps", {})
-    if not gaps:
-        st.markdown(
-            '<div style="color:#555;padding:40px 0;">Gap analysis not available</div>',
-            unsafe_allow_html=True)
-        return
+            section_summaries = summ.get("section_summaries", {})
+            if section_summaries:
+                for sec_name, text in section_summaries.items():
+                    if text:
+                        st.markdown(card(
+                            card_title(sec_name.lower()) +
+                            f'<p style="font-size:12px;color:#999;line-height:1.7;margin:0;">{text}</p>'
+                        ), unsafe_allow_html=True)
 
-    if st.button("← Overview", key="back_gaps"):
-        st.session_state["active_section"] = "overview"
-        st.rerun()
+            contributions = summ.get("contributions", [])
+            if contributions:
+                items = "".join([f'<li style="font-size:12px;color:#bbb;margin-bottom:6px;">{c}</li>' for c in contributions])
+                st.markdown(card(
+                    card_title("key contributions") +
+                    f'<ul style="margin:0;padding-left:18px;">{items}</ul>'
+                ), unsafe_allow_html=True)
 
-    st.markdown("""
-    <div style="font-size:20px;font-weight:700;color:#fff;
-                padding:20px 0 16px 0;">Research Gaps</div>
-    """, unsafe_allow_html=True)
+            future = summ.get("future_work", [])
+            if future:
+                items = "".join([f'<li style="font-size:12px;color:#bbb;margin-bottom:6px;">{f}</li>' for f in future])
+                st.markdown(card(
+                    card_title("future work") +
+                    f'<ul style="margin:0;padding-left:18px;">{items}</ul>'
+                ), unsafe_allow_html=True)
 
-    domain = gaps.get("domain", {})
-    dom_name = domain.get("primary_domain", "—")
-    conf = round(domain.get("confidence", 0) * 100, 1)
-    st.markdown(
-        card(
-            section_label("DOMAIN DETECTED") +
-            f'<span style="font-size:16px;color:#f0f0f0;font-weight:600;">'
-            f'{dom_name.upper()}</span>'
-            f'<span style="font-size:12px;color:#555;margin-left:12px;">'
-            f'{conf}% confidence</span>'
-        ),
-        unsafe_allow_html=True)
+        # ── Gaps view
+        elif section == "gaps":
+            gap_data = results.get("gaps", {})
+            domain = gap_data.get("domain", {})
+            primary = domain.get("primary_domain", "Unknown").replace("_", " ").title()
+            conf = domain.get("confidence", 0)
 
-    limitations = gaps.get("limitations", [])
-    if limitations:
-        items = "".join(
-            f'<div style="padding:8px 0;border-bottom:1px solid #1e1e1e;'
-            f'font-size:13px;color:#ccc;">'
-            f'<span style="color:#fbbf24;margin-right:8px;">⚠</span>'
-            f'{lim}</div>'
-            for lim in limitations)
-        st.markdown(
-            card(section_label("LIMITATIONS FOUND") + items),
-            unsafe_allow_html=True)
+            st.markdown(card(
+                card_title("detected domain") +
+                f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+                f'<span style="font-size:16px;font-weight:500;color:#f0f0f0;">{primary}</span>'
+                f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:12px;color:#555;">{conf:.0%} confidence</span>'
+                f'</div>'
+            ), unsafe_allow_html=True)
 
-    future = gaps.get("future_work", [])
-    if future:
-        items = "".join(
-            f'<div style="padding:8px 0;border-bottom:1px solid #1e1e1e;'
-            f'font-size:13px;color:#ccc;">'
-            f'<span style="color:#4ade80;margin-right:8px;">→</span>'
-            f'{fw}</div>'
-            for fw in future)
-        st.markdown(
-            card(section_label("FUTURE WORK") + items),
-            unsafe_allow_html=True)
+            limitations = gap_data.get("limitations", [])
+            if limitations:
+                items = "".join([f'<li style="font-size:12px;color:#bbb;margin-bottom:6px;">{l}</li>' for l in limitations])
+                st.markdown(card(
+                    card_title("limitations found") +
+                    f'<ul style="margin:0;padding-left:18px;">{items}</ul>'
+                ), unsafe_allow_html=True)
 
-    missing = gaps.get("missing_baselines", [])
-    if missing:
-        pills = "".join(
-            f'<span style="display:inline-block;padding:4px 12px;'
-            f'background:#2a1a1a;color:#f87171;'
-            f'border:1px solid #5a2d2d;border-radius:20px;'
-            f'font-size:12px;margin:3px;">{b}</span>'
-            for b in missing)
-        st.markdown(
-            card(section_label("MISSING BASELINES") + pills),
-            unsafe_allow_html=True)
+            future = gap_data.get("future_work", [])
+            if future:
+                items = "".join([f'<li style="font-size:12px;color:#bbb;margin-bottom:6px;">{f}</li>' for f in future])
+                st.markdown(card(
+                    card_title("future work mentioned") +
+                    f'<ul style="margin:0;padding-left:18px;">{items}</ul>'
+                ), unsafe_allow_html=True)
 
-    suggestions = gaps.get("suggestions", [])
-    if suggestions:
-        items = "".join(
-            f'<div style="padding:8px 0;border-bottom:1px solid #1e1e1e;'
-            f'font-size:13px;color:#999;">'
-            f'<span style="color:#777;margin-right:8px;">◦</span>'
-            f'{s}</div>'
-            for s in suggestions)
-        st.markdown(
-            card(section_label("SUGGESTIONS") + items),
-            unsafe_allow_html=True)
+            baselines = gap_data.get("missing_baselines", [])
+            if baselines:
+                items = "".join([f'<li style="font-size:12px;color:#fbbf24;margin-bottom:6px;">{b}</li>' for b in baselines])
+                st.markdown(card(
+                    card_title("missing baselines") +
+                    f'<ul style="margin:0;padding-left:18px;">{items}</ul>'
+                ), unsafe_allow_html=True)
 
-# ── Summary view ───────────────────────────────────────
-def render_summary_view(results):
-    summ = results.get("summary_data", {})
-    if not summ:
-        st.markdown(
-            '<div style="color:#555;padding:40px 0;">Summary not available</div>',
-            unsafe_allow_html=True)
-        return
+            keywords = gap_data.get("keywords", [])
+            if keywords:
+                kw_html = "".join([
+                    f'<span style="font-size:11px;padding:3px 10px;border-radius:20px;background:#1e1e1e;'
+                    f'color:#666;border:1px solid #2a2a2a;margin:3px;">{k}</span>'
+                    for k in keywords[:15]
+                ])
+                st.markdown(card(
+                    card_title("top keywords") +
+                    f'<div style="display:flex;flex-wrap:wrap;gap:2px;">{kw_html}</div>'
+                ), unsafe_allow_html=True)
 
-    if st.button("← Overview", key="back_summ"):
-        st.session_state["active_section"] = "overview"
-        st.rerun()
+        # ── Improvements view
+        elif section == "improvements":
+            final = st.session_state.get("final_score", {})
+            priorities = final.get("improvement_priorities", [])
+            if priorities:
+                for i, p in enumerate(priorities, 1):
+                    name = p.get("display_name", p.get("module", ""))
+                    pct = p.get("percentage", 0)
+                    gap = p.get("gap", 0)
+                    priority = p.get("priority", "Medium")
+                    p_color = "#f87171" if priority == "High" else "#fbbf24"
+                    st.markdown(card(
+                        f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+                        f'<div>'
+                        f'<span style="font-size:11px;color:#555;margin-right:8px;">#{i}</span>'
+                        f'<span style="font-size:13px;font-weight:500;color:#f0f0f0;">{name}</span>'
+                        f'</div>'
+                        f'<span style="font-size:11px;padding:2px 8px;border-radius:3px;background:rgba(255,255,255,0.03);'
+                        f'border:1px solid {p_color};color:{p_color};">{priority}</span>'
+                        f'</div>'
+                        f'<div style="margin-top:10px;">'
+                        f'<div style="background:#252525;height:4px;border-radius:2px;overflow:hidden;">'
+                        f'<div style="background:{score_color(pct)};width:{min(pct,100)}%;height:100%;border-radius:2px;"></div>'
+                        f'</div>'
+                        f'<div style="display:flex;justify-content:space-between;margin-top:4px;">'
+                        f'<span style="font-size:11px;color:#555;">current: {pct:.0f}%</span>'
+                        f'<span style="font-size:11px;color:#555;">gap: {gap:.1f} pts</span>'
+                        f'</div>'
+                        f'</div>'
+                    ), unsafe_allow_html=True)
+            else:
+                st.markdown(card('<p style="font-size:13px;color:#555;margin:0;">No improvement data available.</p>'), unsafe_allow_html=True)
 
-    st.markdown("""
-    <div style="font-size:20px;font-weight:700;color:#fff;
-                padding:20px 0 16px 0;">Paper Summary</div>
-    """, unsafe_allow_html=True)
+        # ── Section detail view (abstract, introduction, methodology, etc.)
+        else:
+            module_map = {
+                "abstract":     ("abstract", "Abstract"),
+                "introduction": ("introduction", "Introduction"),
+                "literature":   ("literature", "Literature Review"),
+                "methodology":  ("methodology", "Methodology"),
+                "results":      ("results", "Results"),
+                "discussion":   ("discussion", "Discussion"),
+                "conclusion":   ("conclusion", "Conclusion"),
+            }
 
-    tldr = summ.get("tldr", "")
-    if tldr:
-        st.markdown(
-            card(
-                section_label("TL;DR") +
-                f'<div style="font-size:14px;color:#d0d0d0;'
-                f'line-height:1.7;">{tldr}</div>'
-            ),
-            unsafe_allow_html=True)
+            if section in module_map:
+                key, display_name = module_map[section]
+                data = results.get(key, {})
+                score_val = data.get("total_score", 0)
+                sec_used = data.get("section_used", "—")
+                words = data.get("section_length_words", data.get("word_count", "—"))
+                fallback = data.get("no_dedicated_section", False)
 
-    contrib = summ.get("contributions", [])
-    if contrib:
-        items = "".join(
-            f'<div style="padding:7px 0;border-bottom:1px solid #1e1e1e;'
-            f'font-size:13px;color:#ccc;">'
-            f'<span style="color:#4ade80;margin-right:8px;">✓</span>'
-            f'{c}</div>'
-            for c in contrib)
-        st.markdown(
-            card(section_label("KEY CONTRIBUTIONS") + items),
-            unsafe_allow_html=True)
-
-    findings = summ.get("findings", [])
-    if findings:
-        items = "".join(
-            f'<div style="padding:7px 0;border-bottom:1px solid #1e1e1e;'
-            f'font-size:13px;color:#ccc;">'
-            f'<span style="color:#fbbf24;margin-right:8px;">◆</span>'
-            f'{f}</div>'
-            for f in findings)
-        st.markdown(
-            card(section_label("KEY FINDINGS") + items),
-            unsafe_allow_html=True)
-
-    fw = summ.get("future_work", [])
-    if fw:
-        items = "".join(
-            f'<div style="padding:7px 0;border-bottom:1px solid #1e1e1e;'
-            f'font-size:13px;color:#ccc;">'
-            f'<span style="color:#777;margin-right:8px;">→</span>'
-            f'{f}</div>'
-            for f in fw)
-        st.markdown(
-            card(section_label("FUTURE WORK") + items),
-            unsafe_allow_html=True)
-
-    ratio = summ.get("compression_ratio", 0)
-    if ratio:
-        st.markdown(
-            card(
-                section_label("COMPRESSION") +
-                f'<span style="font-family:JetBrains Mono,monospace;'
-                f'font-size:24px;font-weight:700;color:#4ade80;">'
-                f'{ratio}x</span>'
-                f'<span style="font-size:12px;color:#555;margin-left:10px;">'
-                f'compression ratio</span>'
-            ),
-            unsafe_allow_html=True)
-
-# ── Improvements view ──────────────────────────────────
-def render_improvements_view(final):
-    priorities = final.get("improvement_priorities", [])
-
-    if st.button("← Overview", key="back_impr"):
-        st.session_state["active_section"] = "overview"
-        st.rerun()
-
-    st.markdown("""
-    <div style="font-size:20px;font-weight:700;color:#fff;
-                padding:20px 0 16px 0;">Top Improvement Priorities</div>
-    """, unsafe_allow_html=True)
-
-    summary = final.get("summary_feedback", "")
-    if summary:
-        st.markdown(
-            card(
-                section_label("REVIEWER SUMMARY") +
-                f'<div style="font-size:13px;color:#ccc;line-height:1.7;">'
-                f'{summary}</div>'
-            ),
-            unsafe_allow_html=True)
-
-    if not priorities:
-        st.markdown(
-            '<div style="color:#555;padding:20px 0;">No priority data</div>',
-            unsafe_allow_html=True)
-        return
-
-    for i, item in enumerate(priorities, 1):
-        name = item.get("display_name", "—")
-        pct = round(item.get("percentage", 0), 1)
-        priority = item.get("priority", "Medium")
-        gap = round(item.get("gap", 0), 1)
-        pc = score_color(pct)
-        rank_color = ["#f87171", "#fbbf24", "#4ade80"][
-            min(i - 1, 2)]
-
-        st.markdown(
-            card(f"""
-            <div style="display:flex;justify-content:space-between;
-                        align-items:center;margin-bottom:10px;">
-                <div style="display:flex;align-items:center;gap:12px;">
-                    <span style="font-family:'JetBrains Mono',monospace;
-                                 font-size:18px;font-weight:700;
-                                 color:{rank_color};">#{i}</span>
-                    <div>
-                        <div style="font-size:14px;font-weight:600;
-                                    color:#f0f0f0;">{name}</div>
-                        <div style="font-size:11px;color:#555;
-                                    margin-top:2px;">
-                            Gap: {gap} points</div>
-                    </div>
+                # Header
+                fallback_note = ' <span style="font-size:10px;color:#fbbf24;">fallback</span>' if fallback else ""
+                st.markdown(f"""
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+                  <div>
+                    <h2 style="font-size:18px;font-weight:600;color:#f0f0f0;margin:0 0 4px;">{display_name}</h2>
+                    <span style="font-size:12px;color:#555;">Section: {sec_used}{fallback_note} · {words} words</span>
+                  </div>
+                  <div style="text-align:right;">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:500;
+                                color:{score_color(score_val)};">{round(score_val)}</div>
+                    <div style="font-size:11px;color:#555;">out of 100</div>
+                  </div>
                 </div>
-                <div style="text-align:right;">
-                    <div style="font-family:'JetBrains Mono',monospace;
-                                font-size:18px;font-weight:700;
-                                color:{pc};">{pct}%</div>
-                    <div style="font-size:10px;color:#555;
-                                margin-top:2px;">{priority} Priority</div>
-                </div>
-            </div>
-            <div style="background:#252525;border-radius:3px;
-                        height:4px;overflow:hidden;">
-                <div style="width:{pct}%;height:100%;
-                            background:{pc};border-radius:3px;">
-                </div>
-            </div>
-            """),
-            unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
 
-# ── Router ─────────────────────────────────────────────
-def main():
-    view = st.session_state.get("view", "upload")
-    if view == "upload":
-        view_upload()
-    elif view == "analyzing":
-        view_analyzing()
-    elif view in ["overview", "detail"]:
-        view_overview()
+                # Dimension scores
+                scores_dict = data.get("scores", {})
+                if scores_dict:
+                    rows = ""
+                    for dim, val in scores_dict.items():
+                        label = dim.replace("_", " ")
+                        c = score_color(val)
+                        rows += f"""
+                        <div style="display:grid;grid-template-columns:160px 1fr 32px;align-items:center;
+                                    gap:12px;margin-bottom:9px;">
+                          <span style="font-size:12px;color:#666;">{label}</span>
+                          <div style="background:#252525;height:4px;border-radius:2px;overflow:hidden;">
+                            <div style="background:{c};width:{min(val,100)}%;height:100%;border-radius:2px;"></div>
+                          </div>
+                          <span style="font-family:'JetBrains Mono',monospace;font-size:12px;
+                                       color:{c};text-align:right;">{round(val)}</span>
+                        </div>"""
+                    st.markdown(card(card_title("dimension breakdown") + rows), unsafe_allow_html=True)
 
-main()
+                # Components
+                comps = data.get("components_found", {})
+                if comps:
+                    chips_html = "".join([chip(k.replace("_", " "), v) for k, v in comps.items()])
+                    st.markdown(card(
+                        card_title("components") +
+                        f'<div style="display:flex;flex-wrap:wrap;gap:3px;">{chips_html}</div>'
+                    ), unsafe_allow_html=True)
+
+                # Feedback
+                fb_items = data.get("feedback", [])
+                warnings = data.get("warnings", [])
+                if fb_items or warnings:
+                    fb_html = ""
+                    for w in warnings:
+                        fb_html += f'<div style="display:flex;gap:10px;padding:7px 0;border-bottom:1px solid #1e1e1e;font-size:12px;color:#bbb;line-height:1.5;"><span style="color:#f87171;flex-shrink:0;">✗</span><span>{w}</span></div>'
+                    for fb in fb_items:
+                        color = "#fbbf24"
+                        icon = "⚠"
+                        if any(w in fb.lower() for w in ["good", "strong", "excellent", "clear", "ideal", "well"]):
+                            color = "#4ade80"
+                            icon = "✓"
+                        elif any(w in fb.lower() for w in ["missing", "absent", "not found", "no "]):
+                            color = "#f87171"
+                            icon = "✗"
+                        fb_html += f'<div style="display:flex;gap:10px;padding:7px 0;border-bottom:1px solid #1e1e1e;font-size:12px;color:#bbb;line-height:1.5;"><span style="color:{color};flex-shrink:0;font-size:13px;">{icon}</span><span>{fb}</span></div>'
+                    st.markdown(card(card_title("feedback") + fb_html), unsafe_allow_html=True)
+
+                # Extra stats
+                extra = {}
+                for k in ["avg_sentence_length", "passive_ratio", "title_similarity",
+                          "abstract_intro_similarity", "abstract_conclusion_similarity",
+                          "citation_density_per_100", "total_numbers_found"]:
+                    if k in data:
+                        extra[k.replace("_", " ")] = data[k]
+                if extra:
+                    stats_html = "".join([
+                        f'<div style="display:flex;justify-content:space-between;padding:6px 0;'
+                        f'border-bottom:1px solid #1e1e1e;">'
+                        f'<span style="font-size:12px;color:#555;">{k}</span>'
+                        f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:12px;color:#999;">{round(v, 2) if isinstance(v, float) else v}</span>'
+                        f'</div>'
+                        for k, v in extra.items()
+                    ])
+                    st.markdown(card(card_title("statistics") + stats_html), unsafe_allow_html=True)
+
+# ── Router ────────────────────────────────────────────────────────────────────
+view = st.session_state["view"]
+
+if view == "upload":
+    view_upload()
+elif view == "analyzing":
+    view_analyzing()
+elif view == "overview":
+    view_overview()
+elif view == "detail":
+    view_detail()
+else:
+    view_upload()
